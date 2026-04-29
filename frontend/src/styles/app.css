@@ -1,0 +1,285 @@
+:root {
+  color: #17201b;
+  background: #eef3f0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 1440px; margin: 0 auto; padding: 24px; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+h1, h2, h3, p { margin-top: 0; }
+h1 { font-size: 34px; margin-bottom: 4px; letter-spacing: 0; }
+h2 { font-size: 17px; margin: 0; }
+h3 { font-size: 14px; margin-bottom: 10px; }
+p, span, label, input, select, textarea, button, li { font-size: 14px; }
+.topbar p, .muted, small { color: #65716b; }
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  gap: 18px;
+}
+
+.grid { display: grid; gap: 12px; }
+.metricsGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 18px; }
+.stack { display: flex; flex-direction: column; gap: 18px; }
+
+.panel, .statCard {
+  background: #ffffff;
+  border: 1px solid #dbe4df;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(20, 30, 25, 0.04);
+}
+
+.panel { padding: 16px; }
+.panelTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.panelTitle svg, .statCard svg { color: #216b4a; width: 20px; height: 20px; }
+
+.statCard {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 4px 10px;
+  align-items: center;
+}
+.statCard strong { grid-column: 2; font-size: 24px; }
+.statCard span { color: #65716b; }
+
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.miniGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.miniCard {
+  border: 1px solid #e0e7e3;
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 78px;
+}
+.miniCard span, .miniCard small { color: #65716b; }
+.miniCard strong { font-size: 18px; overflow-wrap: anywhere; }
+
+.barList { display: flex; flex-direction: column; gap: 10px; }
+.barRow {
+  display: grid;
+  grid-template-columns: 70px 1fr 50px;
+  align-items: center;
+  gap: 8px;
+}
+.barRow div {
+  height: 10px;
+  background: #e6eee9;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.barRow div span {
+  display: block;
+  height: 100%;
+  background: #216b4a;
+}
+
+.warningList {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.warningList p, .notice {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #fff4db;
+  border: 1px solid #f0d18b;
+}
+.notice { margin-bottom: 16px; }
+
+button, .iconButton, .primary, a {
+  border: 1px solid #cbd8d1;
+  background: #ffffff;
+  color: #17201b;
+  border-radius: 6px;
+  min-height: 36px;
+  padding: 8px 10px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.primary {
+  background: #216b4a;
+  border-color: #216b4a;
+  color: white;
+}
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.form, .coachControls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.batchMetrics textarea { min-height: 64px; }
+.metricEntryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.metricEntryGrid label {
+  border: 1px solid #e0e7e3;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fbfdfc;
+}
+.metricEntryGrid span {
+  color: #405047;
+  font-size: 12px;
+  min-height: 30px;
+  display: flex;
+  align-items: end;
+}
+.metricEntryGrid input {
+  min-height: 34px;
+  padding: 7px 8px;
+}
+label { display: flex; flex-direction: column; gap: 5px; color: #405047; }
+input, select, textarea {
+  width: 100%;
+  border: 1px solid #cbd8d1;
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: #fbfdfc;
+  color: #17201b;
+}
+textarea { min-height: 82px; resize: vertical; }
+
+.inlineForm {
+  display: grid;
+  grid-template-columns: 140px 105px 140px 1fr 90px 120px 70px;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.calendarList, .workoutList, .compactList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.calendarItem, .workout, .compactList > div, .connector {
+  border: 1px solid #e0e7e3;
+  border-radius: 6px;
+  padding: 10px;
+}
+.calendarItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.calendarItem div:first-child, .compactList > div, .workout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.calendarItem.completed { border-color: #7bb08c; background: #f1faf4; }
+.calendarItem.missed { border-color: #d6988b; background: #fff5f2; }
+.buttonRow { display: flex; gap: 6px; }
+
+.coachResult {
+  margin-top: 14px;
+  border-top: 1px solid #e0e7e3;
+  padding-top: 14px;
+}
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+ul { padding-left: 20px; margin-top: 0; }
+li { margin-bottom: 6px; }
+
+.connector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ollamaStatus {
+  border: 1px solid #e0e7e3;
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.ollamaStatus.online { background: #f1faf4; border-color: #7bb08c; }
+.ollamaStatus.offline { background: #fff5f2; border-color: #d6988b; }
+.command {
+  display: block;
+  background: #17201b;
+  color: #edf5ef;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+.recommendation {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.recommendation p { margin-bottom: 2px; }
+.compactStatus {
+  margin-top: 10px;
+  border: 1px solid #e0e7e3;
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.placesList {
+  margin-top: 14px;
+}
+
+@media (max-width: 980px) {
+  main { padding: 14px; }
+  .layout, .split, .columns { grid-template-columns: 1fr; }
+  .metricsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inlineForm { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 560px) {
+  .topbar, .calendarItem { flex-direction: column; align-items: stretch; }
+  .metricsGrid, .miniGrid, .inlineForm, .metricEntryGrid { grid-template-columns: 1fr; }
+  h1 { font-size: 28px; }
+}

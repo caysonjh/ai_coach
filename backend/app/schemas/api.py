@@ -1,0 +1,154 @@
+from datetime import date, datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from app.models.entities import GearType, MetricType, Source, Sport, SportVariant, WorkoutStatus
+
+
+class ActivityCreate(BaseModel):
+    source: Source = Source.manual
+    source_id: str | None = None
+    sport: Sport
+    sport_variant: SportVariant = SportVariant.other
+    gear_id: str | None = None
+    name: str
+    start_time: datetime
+    duration_seconds: int
+    distance_meters: float | None = None
+    elevation_meters: float | None = None
+    avg_hr: float | None = None
+    max_hr: float | None = None
+    avg_power: float | None = None
+    max_power: float | None = None
+    avg_pace_seconds_per_km: float | None = None
+    calories: float | None = None
+    perceived_effort: int | None = Field(default=None, ge=1, le=10)
+    training_effect: float | None = None
+    notes: str = ""
+    raw_payload: dict[str, Any] = {}
+
+
+class HealthMetricCreate(BaseModel):
+    metric_date: date
+    metric_type: MetricType
+    custom_name: str | None = None
+    value_num: float | None = None
+    value_text: str | None = None
+    unit: str | None = None
+    source: Source = Source.manual
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    notes: str = ""
+
+
+class PlannedWorkoutCreate(BaseModel):
+    planned_date: date
+    sport: Sport
+    sport_variant: SportVariant = SportVariant.other
+    title: str
+    description: str = ""
+    duration_minutes: int | None = None
+    distance_meters: float | None = None
+    intensity: str = "easy"
+    surface: str | None = None
+    location_suggestion: str | None = None
+    gear_suggestion: str | None = None
+    status: WorkoutStatus = WorkoutStatus.planned
+    source: Source = Source.manual
+
+
+class ScheduleConstraintCreate(BaseModel):
+    constraint_date: date
+    label: str
+    available_minutes: int | None = None
+    unavailable: bool = False
+    notes: str = ""
+
+
+class CoachRequest(BaseModel):
+    message: str
+    week_start: date | None = None
+    aggressiveness: float = Field(default=0.45, ge=0, le=1)
+    autonomy: str = "suggest_then_approve"
+
+
+class CoachResponse(BaseModel):
+    title: str
+    summary: str
+    recommendations: list[str]
+    risks: list[str]
+    proposed_workouts: list[PlannedWorkoutCreate] = []
+    used_ollama: bool
+    raw: dict[str, Any] = {}
+
+
+class SettingsResponse(BaseModel):
+    app_name: str
+    ollama_base_url: str
+    ollama_model: str
+    ollama_embed_model: str
+    garmin_non_official_enabled: bool
+    strava_configured: bool
+
+
+class ModelRecommendation(BaseModel):
+    recommended: str
+    alternatives: list[dict[str, str]]
+    rationale: str
+
+
+class GarminImportStatus(BaseModel):
+    import_dir: str
+    supported_extensions: list[str]
+    files_seen: int
+    imported_activities: int
+    imported_metrics: int
+    skipped_files: int
+    failed_files: int
+    message: str
+
+
+class ContextExportResponse(BaseModel):
+    path: str
+    bytes_written: int
+    message: str
+
+
+class TrainingLocationCreate(BaseModel):
+    name: str
+    training_base: str = "Newport Beach"
+    sport: Sport
+    sport_variant: SportVariant = SportVariant.other
+    surface: str | None = None
+    distance_meters: float | None = None
+    elevation_meters: float | None = None
+    location_notes: str = ""
+    safety_notes: str = ""
+    link_url: str | None = None
+    tags: str = ""
+    active: bool = True
+
+
+class WorkoutLocationFeedbackCreate(BaseModel):
+    location_id: int
+    activity_id: int | None = None
+    planned_workout_id: int | None = None
+    feedback_date: date
+    intended_stimulus: str
+    rating: int = Field(ge=1, le=5)
+    conditions: str = ""
+    notes: str = ""
+    use_again: bool = True
+
+
+class GearItemCreate(BaseModel):
+    strava_gear_id: str | None = None
+    name: str
+    gear_type: GearType
+    distance_meters: float = 0
+    retire_distance_meters: float | None = None
+    active: bool = True
+    preferred_sport_variants: str = ""
+    preferred_surfaces: str = ""
+    notes: str = ""
+    source: Source = Source.manual

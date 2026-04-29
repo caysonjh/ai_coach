@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+ai_coach.db
+*.db
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+garmin_files/
+coach_context.md
