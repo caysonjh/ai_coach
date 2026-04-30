@@ -72,10 +72,10 @@ class CoachService:
 
         profile = session.exec(select(AthleteProfile).limit(1)).first()
         activities = session.exec(
-            select(Activity).where(Activity.start_time >= datetime.combine(since, time.min))
+            select(Activity).where(Activity.start_time >= datetime.combine(since, time.min)).order_by(Activity.start_time.asc())
         ).all()
-        metrics = session.exec(select(HealthMetric).where(HealthMetric.metric_date >= since)).all()
-        planned = session.exec(select(PlannedWorkout).where(PlannedWorkout.planned_date >= week_start)).all()
+        metrics = session.exec(select(HealthMetric).where(HealthMetric.metric_date >= since).order_by(HealthMetric.metric_date.asc())).all()
+        planned = session.exec(select(PlannedWorkout).where(PlannedWorkout.planned_date >= week_start).order_by(PlannedWorkout.planned_date.asc())).all()
         constraints = session.exec(
             select(ScheduleConstraint).where(ScheduleConstraint.constraint_date >= week_start)
         ).all()
@@ -86,6 +86,7 @@ class CoachService:
         me_markdown = read_me_markdown()
 
         summary = summarize_training(activities, metrics, planned, today=today)
+        effective_aggressiveness = self._effective_aggressiveness(request.message, request.aggressiveness)
         suggested_places = {
             "run": rank_locations(locations, feedback, Sport.run, SportVariant.road_run, "easy"),
             "trail_run": rank_locations(locations, feedback, Sport.run, SportVariant.trail_run, "easy"),
@@ -93,13 +94,19 @@ class CoachService:
             "gravel": rank_locations(locations, feedback, Sport.bike, SportVariant.gravel_ride, "endurance"),
             "swim": rank_locations(locations, feedback, Sport.swim, SportVariant.pool_swim, "technique"),
         }
+        request_intent = self._classify_request(request.message, request.conversation_history)
         context = {
             "current_date": today.isoformat(),
             "week_start": week_start.isoformat(),
+            "request_intent": request_intent,
+            "requested_aggressiveness": request.aggressiveness,
+            "effective_aggressiveness": effective_aggressiveness,
+            "aggressiveness_guidance": self._aggressiveness_guidance(effective_aggressiveness),
             "profile": profile.model_dump() if profile else {},
             "athlete_profile_markdown": me_markdown,
             "athlete_profile_markdown_path": str(me_markdown_path()) if me_markdown else "",
             "training_summary": summary,
+            "past_7_days_activity_digest": self._activity_digest(activities, today - timedelta(days=7)),
             "recent_activities": [activity.model_dump() for activity in activities[-20:]],
             "recent_health_metrics": [metric.model_dump() for metric in metrics[-40:]],
             "planned_workouts": [workout.model_dump() for workout in planned[:30]],
@@ -115,7 +122,7 @@ class CoachService:
                 if item.role in {"user", "assistant"} and item.content.strip()
             ],
             "controls": {
-                "aggressiveness": request.aggressiveness,
+                "aggressiveness": effective_aggressiveness,
                 "autonomy": request.autonomy,
             },
         }
@@ -126,10 +133,14 @@ class CoachService:
             "manual Garmin-style health metrics, gear mileage, local training places, and schedule constraints. "
             "Treat athlete_profile_markdown in the user context as durable first-person background about the athlete's "
             "goals, constraints, preferences, location, and training history. Use it in every recommendation. "
+            "Answer the user's actual latest request first. If request_intent is analysis, analyze the data that was asked about and set proposed_workouts to an empty array. "
+            "Do not invent or recommend workouts unless the latest message or conversation clearly asks for a plan, schedule, next workout, or workout adjustment. "
+            "If request_intent is planning, use aggressiveness_guidance as a hard planning constraint: higher aggressiveness should produce meaningfully more load, specificity, or intensity, while still respecting recovery flags. "
+            "When asked to analyze a past week, cite specific activities, approximate durations/distances, discipline balance, load pattern, strengths, gaps, and recovery implications from recent_activities and past_7_days_activity_digest. "
             "Use only these sport values in proposed_workouts: swim, bike, run, strength, climb, mobility, rest, other. "
             "Use only these sport_variant values: road_run, trail_run, road_ride, gravel_ride, mtb_ride, tt_ride, pool_swim, open_water_swim, strength, climb, mobility, rest, other. "
             "Use trail running, gravel cycling, and MTB only as controlled substitutions that preserve the intended triathlon stimulus. "
-            "For run and bike workouts, suggest gear when gear context exists. For workouts where place context exists, suggest a location. Propose changes but "
+            "For run and bike workouts, suggest gear when gear context exists. For workouts where place context exists, suggest a location. "
             f"Today is {today.isoformat()}; interpret relative dates like tomorrow from that date and do not propose past dates. "
             "do not assume approval. Return only valid JSON matching the schema."
         )
@@ -150,7 +161,9 @@ class CoachService:
 
         used_ollama = result is not None
         if result is None:
-            result = self._fallback_response(request, summary, week_start)
+            result = self._fallback_response(request, summary, week_start, activities, request_intent, effective_aggressiveness)
+        elif request_intent == "analysis":
+            result = self._ground_analysis_result(result, activities, summary, today)
 
         response = self._coerce_response(result, used_ollama)
         insight = CoachInsight(
@@ -174,7 +187,7 @@ class CoachService:
                 week_start=week_start,
                 status="proposed",
                 rationale=response.summary,
-                aggressiveness=request.aggressiveness,
+                aggressiveness=effective_aggressiveness,
                 autonomy=request.autonomy,
                 payload=response.model_dump(mode="json"),
             )
@@ -260,9 +273,138 @@ class CoachService:
         except ValueError:
             return SportVariant.other
 
-    def _fallback_response(self, request: CoachRequest, summary: dict, week_start: date) -> dict[str, Any]:
-        recovery_bias = request.aggressiveness < 0.35 or bool(summary.get("recovery_flags"))
+    def _classify_request(self, message: str, history: list[Any]) -> str:
+        normalized = message.lower()
+        analysis_terms = ("analyze", "analysis", "review", "past week", "last week", "how did", "what happened", "where am i")
+        planning_terms = (
+            "plan",
+            "schedule",
+            "propose",
+            "workout",
+            "workouts",
+            "tomorrow",
+            "next week",
+            "more aggressive",
+            "less aggressive",
+            "adjust",
+            "reschedule",
+        )
+        if any(term in normalized for term in planning_terms):
+            return "planning"
+        if any(term in normalized for term in analysis_terms):
+            return "analysis"
+        recent_user_text = " ".join(item.content.lower() for item in history[-4:] if getattr(item, "role", "") == "user")
+        if any(term in recent_user_text for term in planning_terms):
+            return "planning"
+        if any(term in recent_user_text for term in analysis_terms):
+            return "analysis"
+        return "coaching_chat"
+
+    def _aggressiveness_guidance(self, aggressiveness: float) -> str:
+        if aggressiveness < 0.3:
+            return (
+                "Conservative: reduce planned load, avoid intensity unless clearly fresh, bias toward recovery and consistency."
+            )
+        if aggressiveness < 0.55:
+            return (
+                "Balanced: maintain sustainable triathlon frequency and add intensity only where recent recovery and load allow."
+            )
+        if aggressiveness < 0.8:
+            return (
+                "Assertive: if recovery flags are acceptable, increase planned load roughly 10-20%, include a clear key bike/run stimulus, and keep easy days easy."
+            )
+        return (
+            "High: plan at the upper safe edge for an elite age-group build, with meaningful specificity and load, but do not ignore acute recovery flags."
+        )
+
+    def _effective_aggressiveness(self, message: str, slider_value: float) -> float:
+        normalized = message.lower()
+        if "more aggressive" in normalized or "harder" in normalized or "push" in normalized:
+            return max(slider_value, 0.75)
+        if "less aggressive" in normalized or "easier" in normalized or "back off" in normalized:
+            return min(slider_value, 0.25)
+        return slider_value
+
+    def _activity_digest(self, activities: list[Activity], since: date) -> dict[str, Any]:
+        recent = [activity for activity in activities if activity.start_time.date() >= since]
+        by_sport: dict[str, dict[str, float]] = {}
+        for activity in recent:
+            sport = activity.sport.value
+            bucket = by_sport.setdefault(sport, {"count": 0, "hours": 0.0, "distance_km": 0.0})
+            bucket["count"] += 1
+            bucket["hours"] += round(activity.duration_seconds / 3600, 2)
+            bucket["distance_km"] += round((activity.distance_meters or 0) / 1000, 2)
+        return {
+            "activities": [
+                {
+                    "date": activity.start_time.date().isoformat(),
+                    "sport": activity.sport.value,
+                    "variant": activity.sport_variant.value,
+                    "name": activity.name,
+                    "duration_min": round(activity.duration_seconds / 60),
+                    "distance_km": round((activity.distance_meters or 0) / 1000, 2),
+                    "source": activity.source.value,
+                }
+                for activity in recent
+            ],
+            "by_sport": by_sport,
+        }
+
+    def _ground_analysis_result(
+        self,
+        result: dict[str, Any],
+        activities: list[Activity],
+        summary: dict,
+        today: date,
+    ) -> dict[str, Any]:
+        digest = self._activity_digest(activities, today - timedelta(days=7))
+        activity_summaries = [
+            f"{item['date']} {item['sport']} {item['duration_min']} min {item['distance_km']} km ({item['name']})"
+            for item in digest["activities"]
+        ]
+        data_summary = (
+            f"Past 7 days from imported data: {summary['activities_7d']} activities, "
+            f"{summary['volume_7d_hours']} hours, split={summary['discipline_hours_7d']}. "
+            f"Sessions: {'; '.join(activity_summaries) if activity_summaries else 'none'}."
+        )
+        result["title"] = result.get("title") or "Past Week Training Analysis"
+        result["summary"] = f"{data_summary}\n\n{result.get('summary', '')}".strip()
+        result["proposed_workouts"] = []
+        return result
+
+    def _fallback_response(
+        self,
+        request: CoachRequest,
+        summary: dict,
+        week_start: date,
+        activities: list[Activity],
+        request_intent: str,
+        effective_aggressiveness: float,
+    ) -> dict[str, Any]:
+        if request_intent == "analysis":
+            digest = self._activity_digest(activities, date.today() - timedelta(days=7))
+            activity_lines = [
+                f"{item['date']} {item['sport']}: {item['name']} ({item['duration_min']} min, {item['distance_km']} km)"
+                for item in digest["activities"]
+            ]
+            return {
+                "title": "Past Week Training Analysis",
+                "summary": (
+                    f"Over the last 7 days you logged {summary['activities_7d']} activities and "
+                    f"{summary['volume_7d_hours']} hours. Discipline split: {summary['discipline_hours_7d']}. "
+                    f"Recent sessions: {'; '.join(activity_lines) if activity_lines else 'none imported'}."
+                ),
+                "recommendations": [
+                    "Use this analysis as the baseline before changing the next training block.",
+                    "Look for whether swim, bike, and run frequency are all represented before adding extra intensity.",
+                ],
+                "risks": summary.get("recovery_flags", []) + ["Ollama was unavailable, so this is rule-based."],
+                "proposed_workouts": [],
+            }
+
+        recovery_bias = effective_aggressiveness < 0.35 or bool(summary.get("recovery_flags"))
         intensity = "easy" if recovery_bias else "moderate"
+        volume_multiplier = 0.8 if effective_aggressiveness < 0.3 else 1.0 if effective_aggressiveness < 0.55 else 1.2 if effective_aggressiveness < 0.8 else 1.35
         anchor = max(week_start, date.today())
         recommendations = [
             "Keep Strava as the activity truth source and manually log Garmin recovery metrics daily.",
@@ -289,7 +431,7 @@ class CoachService:
                     "sport_variant": "road_run",
                     "title": "Aerobic Run",
                     "description": "Conversational Z2 run. Stop early if R-CPD pressure or CFS fatigue escalates.",
-                    "duration_minutes": 45 if recovery_bias else 60,
+                    "duration_minutes": round((45 if recovery_bias else 60) * volume_multiplier),
                     "distance_meters": None,
                     "intensity": intensity,
                     "surface": "road",
@@ -304,7 +446,7 @@ class CoachService:
                     "sport_variant": "gravel_ride",
                     "title": "Controlled Bike Endurance",
                     "description": "Steady aerobic ride. Gravel is acceptable if it stays aerobic and does not replace race-specific TT work.",
-                    "duration_minutes": 75 if recovery_bias else 105,
+                    "duration_minutes": round((75 if recovery_bias else 105) * volume_multiplier),
                     "distance_meters": None,
                     "intensity": intensity,
                     "surface": "gravel",
