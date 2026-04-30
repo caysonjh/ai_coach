@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
@@ -8,6 +6,7 @@ from app.api.routes import router
 from app.db.session import engine, init_db
 from app.models.entities import AthleteProfile, CoachMemory
 from app.services.activity_dedupe import deduplicate_existing_activities
+from app.services.athlete_context import read_me_markdown
 from app.services.garmin_files import scan_garmin_directory
 from app.services.state_export import export_coach_context
 
@@ -37,11 +36,14 @@ def create_app() -> FastAPI:
 
 def seed_profile() -> None:
     with Session(engine) as session:
+        notes = read_me_markdown()
         existing = session.exec(select(AthleteProfile).limit(1)).first()
         if existing:
+            if notes and existing.notes != notes:
+                existing.notes = notes
+                session.add(existing)
+                session.commit()
             return
-        me_path = Path(__file__).resolve().parents[2] / "me.md"
-        notes = me_path.read_text(encoding="utf-8") if me_path.exists() else ""
         profile = AthleteProfile(
             name="Cayson Hamilton",
             goal_summary=(

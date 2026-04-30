@@ -16,6 +16,7 @@ from app.models.entities import (
     WorkoutLocationFeedback,
 )
 from app.services.analytics import summarize_training
+from app.services.athlete_context import me_markdown_path, read_me_markdown
 
 
 def export_coach_context(session: Session) -> tuple[Path, int]:
@@ -37,9 +38,11 @@ def export_coach_context(session: Session) -> tuple[Path, int]:
     feedback = session.exec(select(WorkoutLocationFeedback).order_by(WorkoutLocationFeedback.feedback_date.desc()).limit(20)).all()
     gear = session.exec(select(GearItem).where(GearItem.active == True)).all()  # noqa: E712
     summary = summarize_training(activities, metrics, workouts, today=today)
+    me_markdown = read_me_markdown()
 
     content = _render_context(
         profile,
+        me_markdown,
         summary,
         activities[-12:],
         metrics[-30:],
@@ -56,6 +59,7 @@ def export_coach_context(session: Session) -> tuple[Path, int]:
 
 def _render_context(
     profile: AthleteProfile | None,
+    me_markdown: str,
     summary: dict,
     activities: list[Activity],
     metrics: list[HealthMetric],
@@ -77,6 +81,10 @@ def _render_context(
         f"- Goal race: {profile.goal_race if profile else 'TBD'}",
         f"- Target time: {profile.target_time if profile else 'TBD'}",
         "- Constraints: R-CPD GI risk, chronic fatigue syndrome, ADHD/depression, variable schedule.",
+        f"- Live profile source: {me_markdown_path() if me_markdown else 'me.md not found'}",
+        "",
+        "## me.md Profile",
+        me_markdown.strip() if me_markdown else "No me.md profile content available.",
         "",
         "## Current Training Summary",
         f"- 7-day volume: {summary['volume_7d_hours']} hours",

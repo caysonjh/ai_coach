@@ -21,6 +21,7 @@ from app.models.entities import (
 )
 from app.schemas.api import CoachRequest, CoachResponse, PlannedWorkoutCreate
 from app.services.analytics import summarize_training
+from app.services.athlete_context import me_markdown_path, read_me_markdown
 from app.services.ollama import OllamaClient
 from app.services.recommendations import rank_locations
 from app.services.state_export import export_coach_context
@@ -82,6 +83,7 @@ class CoachService:
         locations = session.exec(select(TrainingLocation).where(TrainingLocation.active == True)).all()  # noqa: E712
         feedback = session.exec(select(WorkoutLocationFeedback).order_by(WorkoutLocationFeedback.feedback_date.desc()).limit(50)).all()
         gear = session.exec(select(GearItem).where(GearItem.active == True)).all()  # noqa: E712
+        me_markdown = read_me_markdown()
 
         summary = summarize_training(activities, metrics, planned, today=today)
         suggested_places = {
@@ -95,6 +97,8 @@ class CoachService:
             "current_date": today.isoformat(),
             "week_start": week_start.isoformat(),
             "profile": profile.model_dump() if profile else {},
+            "athlete_profile_markdown": me_markdown,
+            "athlete_profile_markdown_path": str(me_markdown_path()) if me_markdown else "",
             "training_summary": summary,
             "recent_activities": [activity.model_dump() for activity in activities[-20:]],
             "recent_health_metrics": [metric.model_dump() for metric in metrics[-40:]],
@@ -115,6 +119,8 @@ class CoachService:
             "You are a precise triathlon coach for an aspiring elite age-group 70.3 athlete. "
             "Account for R-CPD GI risk, chronic fatigue syndrome, strength, climbing, sleep, "
             "manual Garmin-style health metrics, gear mileage, local training places, and schedule constraints. "
+            "Treat athlete_profile_markdown in the user context as durable first-person background about the athlete's "
+            "goals, constraints, preferences, location, and training history. Use it in every recommendation. "
             "Use only these sport values in proposed_workouts: swim, bike, run, strength, climb, mobility, rest, other. "
             "Use only these sport_variant values: road_run, trail_run, road_ride, gravel_ride, mtb_ride, tt_ride, pool_swim, open_water_swim, strength, climb, mobility, rest, other. "
             "Use trail running, gravel cycling, and MTB only as controlled substitutions that preserve the intended triathlon stimulus. "
