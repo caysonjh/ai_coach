@@ -108,6 +108,11 @@ export type CoachResponse = {
   used_ollama: boolean;
 };
 
+export type CoachChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type OllamaStatus = {
   running: boolean;
   base_url: string;

@@ -65,8 +65,14 @@ class ScheduleConstraintCreate(BaseModel):
     notes: str = ""
 
 
+class CoachChatMessage(BaseModel):
+    role: str
+    content: str
+
+
 class CoachRequest(BaseModel):
     message: str
+    conversation_history: list[CoachChatMessage] = []
     week_start: date | None = None
     aggressiveness: float = Field(default=0.45, ge=0, le=1)
     autonomy: str = "suggest_then_approve"

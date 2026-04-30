@@ -17,6 +17,7 @@ import {
 import {
   Activity,
   api,
+  CoachChatMessage,
   CoachResponse,
   Dashboard,
   GearItem,
@@ -38,6 +39,11 @@ const tabs = [
 ] as const;
 type TabId = (typeof tabs)[number]["id"];
 
+type CoachThreadMessage = CoachChatMessage & {
+  id: string;
+  response?: CoachResponse;
+};
+
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -49,7 +55,14 @@ function App() {
   const [locationFeedback, setLocationFeedback] = useState<LocationFeedback[]>([]);
   const [gear, setGear] = useState<GearItem[]>([]);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
-  const [coachText, setCoachText] = useState("Review my current training state and propose the next week.");
+  const [coachMessages, setCoachMessages] = useState<CoachThreadMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: "Ask me about your training plan, recovery, upcoming workouts, gear choices, or how to adapt the week."
+    }
+  ]);
+  const [coachText, setCoachText] = useState("");
   const [aggressiveness, setAggressiveness] = useState(0.45);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -80,26 +93,50 @@ function App() {
   }, []);
 
   async function askCoach() {
+    const messageText = coachText.trim();
+    if (!messageText) return;
+    const userMessage: CoachThreadMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: messageText
+    };
+    const history = coachMessages
+      .filter((item) => item.id !== "welcome")
+      .slice(-12)
+      .map(({ role, content }) => ({ role, content }));
+    setCoachMessages((current) => [...current, userMessage]);
+    setCoachText("");
     setLoading(true);
     setMessage("");
     try {
       const result = await api.coach({
-        message: coachText,
+        message: messageText,
+        conversation_history: history,
         aggressiveness,
         autonomy: "suggest_then_approve"
       });
       setCoach(result);
+      setCoachMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: result.summary,
+          response: result
+        }
+      ]);
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Coach request failed");
+      setCoachMessages((current) => current.filter((item) => item.id !== userMessage.id));
     } finally {
       setLoading(false);
     }
   }
 
-  async function applyCoachPlan() {
-    if (!coach?.proposed_workouts.length) return;
-    await api.applyWorkouts(coach.proposed_workouts);
+  async function applyCoachPlan(response = coach) {
+    if (!response?.proposed_workouts.length) return;
+    await api.applyWorkouts(response.proposed_workouts);
     setCoach(null);
     await refresh();
   }
@@ -150,11 +187,11 @@ function App() {
           focusMetricCards={focusMetricCards}
           coachText={coachText}
           setCoachText={setCoachText}
+          coachMessages={coachMessages}
           aggressiveness={aggressiveness}
           setAggressiveness={setAggressiveness}
           loading={loading}
           askCoach={askCoach}
-          coach={coach}
           applyCoachPlan={applyCoachPlan}
           workouts={workouts}
           activities={activities}
@@ -187,11 +224,11 @@ function HomeView({
   focusMetricCards,
   coachText,
   setCoachText,
+  coachMessages,
   aggressiveness,
   setAggressiveness,
   loading,
   askCoach,
-  coach,
   applyCoachPlan,
   workouts,
   activities,
@@ -203,12 +240,12 @@ function HomeView({
   focusMetricCards: readonly (readonly [string, Dashboard["latest_metrics"][string]])[];
   coachText: string;
   setCoachText: (value: string) => void;
+  coachMessages: CoachThreadMessage[];
   aggressiveness: number;
   setAggressiveness: (value: number) => void;
   loading: boolean;
   askCoach: () => Promise<void>;
-  coach: CoachResponse | null;
-  applyCoachPlan: () => Promise<void>;
+  applyCoachPlan: (response?: CoachResponse) => Promise<void>;
   workouts: PlannedWorkout[];
   activities: Activity[];
   metrics: HealthMetric[];
@@ -231,11 +268,11 @@ function HomeView({
           <CoachPanel
             coachText={coachText}
             setCoachText={setCoachText}
+            coachMessages={coachMessages}
             aggressiveness={aggressiveness}
             setAggressiveness={setAggressiveness}
             loading={loading}
             askCoach={askCoach}
-            coach={coach}
             applyCoachPlan={applyCoachPlan}
           />
         </div>
@@ -416,55 +453,96 @@ function ManualMetricPanel({ options, refresh }: { options: MetricOption[]; refr
 function CoachPanel(props: {
   coachText: string;
   setCoachText: (value: string) => void;
+  coachMessages: CoachThreadMessage[];
   aggressiveness: number;
   setAggressiveness: (value: number) => void;
   loading: boolean;
   askCoach: () => Promise<void>;
-  coach: CoachResponse | null;
-  applyCoachPlan: () => Promise<void>;
+  applyCoachPlan: (response?: CoachResponse) => Promise<void>;
 }) {
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    void props.askCoach();
+  }
+
   return (
     <Panel title="Coach" icon={<Brain />}>
-      <div className="coachControls">
-        <textarea value={props.coachText} onChange={(e) => props.setCoachText(e.target.value)} />
+      <div className="chatThread">
+        {props.coachMessages.map((message) => (
+          <div className={`chatBubble ${message.role}`} key={message.id}>
+            <span className="chatRole">{message.role === "user" ? "You" : "Coach"}</span>
+            <p>{message.content}</p>
+            {message.response && (
+            <CoachResponseDetails response={message.response} applyCoachPlan={props.applyCoachPlan} />
+            )}
+          </div>
+        ))}
+        {props.loading && (
+          <div className="chatBubble assistant">
+            <span className="chatRole">Coach</span>
+            <p>Thinking through your current context...</p>
+          </div>
+        )}
+      </div>
+
+      <form className="coachComposer" onSubmit={submit}>
+        <textarea
+          value={props.coachText}
+          onChange={(e) => props.setCoachText(e.target.value)}
+          placeholder="Message the coach..."
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void props.askCoach();
+            }
+          }}
+        />
         <label>
           Aggressiveness: {Math.round(props.aggressiveness * 100)}%
           <input type="range" min="0" max="1" step="0.05" value={props.aggressiveness} onChange={(e) => props.setAggressiveness(Number(e.target.value))} />
         </label>
-        <button className="primary" onClick={props.askCoach} disabled={props.loading}>
-          <Send size={16} /> {props.loading ? "Thinking..." : "Ask Coach"}
+        <button className="primary" disabled={props.loading || !props.coachText.trim()}>
+          <Send size={16} /> {props.loading ? "Thinking..." : "Send"}
         </button>
-      </div>
-      {props.coach && (
-        <div className="coachResult">
-          <h3>{props.coach.title}</h3>
-          <p>{props.coach.summary}</p>
-          <div className="columns">
-            <List title="Recommendations" items={props.coach.recommendations} />
-            <List title="Risks" items={props.coach.risks} />
-          </div>
-          {!!props.coach.proposed_workouts.length && (
-            <>
-              <h3>Proposed Workouts</h3>
-              <div className="workoutList">
-                {props.coach.proposed_workouts.map((workout, index) => (
-                  <div className="workout" key={`${workout.planned_date}-${index}`}>
-                    <strong>{workout.planned_date} · {workout.sport_variant ?? workout.sport}</strong>
-                    <span>{workout.title} · {workout.duration_minutes} min · {workout.intensity}</span>
-                    {(workout.location_suggestion || workout.gear_suggestion) && (
-                      <small>{workout.location_suggestion ?? "No location"} · {workout.gear_suggestion ?? "No gear"}</small>
-                    )}
-                    <p>{workout.description}</p>
-                  </div>
-                ))}
-              </div>
-              <button className="primary" onClick={props.applyCoachPlan}><Check size={16} /> Approve Plan</button>
-            </>
-          )}
-          <small>{props.coach.used_ollama ? "Generated by local Ollama." : "Rule-based fallback because Ollama was unavailable."}</small>
-        </div>
-      )}
+      </form>
     </Panel>
+  );
+}
+
+function CoachResponseDetails({
+  response,
+  applyCoachPlan
+}: {
+  response: CoachResponse;
+  applyCoachPlan: (response?: CoachResponse) => Promise<void>;
+}) {
+  return (
+    <div className="coachResult">
+      <h3>{response.title}</h3>
+      <div className="columns">
+        <List title="Recommendations" items={response.recommendations} />
+        <List title="Risks" items={response.risks} />
+      </div>
+      {!!response.proposed_workouts.length && (
+        <>
+          <h3>Proposed Workouts</h3>
+          <div className="workoutList">
+            {response.proposed_workouts.map((workout, index) => (
+              <div className="workout" key={`${workout.planned_date}-${index}`}>
+                <strong>{workout.planned_date} · {workout.sport_variant ?? workout.sport}</strong>
+                <span>{workout.title} · {workout.duration_minutes} min · {workout.intensity}</span>
+                {(workout.location_suggestion || workout.gear_suggestion) && (
+                  <small>{workout.location_suggestion ?? "No location"} · {workout.gear_suggestion ?? "No gear"}</small>
+                )}
+                <p>{workout.description}</p>
+              </div>
+            ))}
+          </div>
+          <button className="primary" onClick={() => applyCoachPlan(response)}><Check size={16} /> Approve Plan</button>
+        </>
+      )}
+      <small>{response.used_ollama ? "Generated by local Ollama." : "Rule-based fallback because Ollama was unavailable."}</small>
+    </div>
   );
 }
 

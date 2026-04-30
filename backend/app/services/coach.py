@@ -109,6 +109,11 @@ class CoachService:
             "ranked_location_suggestions": suggested_places,
             "gear": [item.model_dump() for item in gear],
             "memories": [memory.content for memory in memories],
+            "conversation_history": [
+                {"role": item.role, "content": item.content}
+                for item in request.conversation_history[-12:]
+                if item.role in {"user", "assistant"} and item.content.strip()
+            ],
             "controls": {
                 "aggressiveness": request.aggressiveness,
                 "autonomy": request.autonomy,
@@ -131,7 +136,14 @@ class CoachService:
         result = await self.ollama.chat_json(
             [
                 {"role": "system", "content": system},
-                {"role": "user", "content": f"Request: {request.message}\nContext: {context}"},
+                {
+                    "role": "user",
+                    "content": (
+                        "Use the provided context and conversation_history to answer the latest message. "
+                        "Maintain continuity with the chat while still basing training advice on current data.\n"
+                        f"Latest message: {request.message}\nContext: {context}"
+                    ),
+                },
             ],
             COACH_SCHEMA,
         )

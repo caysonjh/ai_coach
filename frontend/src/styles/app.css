@@ -167,7 +167,7 @@ button, .iconButton, .primary, a {
 }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.form, .coachControls {
+.form, .coachControls, .coachComposer {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -241,6 +241,60 @@ textarea { min-height: 82px; resize: vertical; }
 .calendarItem.missed { border-color: #d6988b; background: #fff5f2; }
 .buttonRow { display: flex; gap: 6px; }
 
+.chatThread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 640px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.chatBubble {
+  border: 1px solid #e0e7e3;
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-width: 86%;
+}
+
+.chatBubble.user {
+  align-self: flex-end;
+  background: #216b4a;
+  border-color: #216b4a;
+  color: #ffffff;
+}
+
+.chatBubble.assistant {
+  align-self: flex-start;
+  background: #fbfdfc;
+}
+
+.chatBubble p {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+}
+
+.chatBubble.user .chatRole {
+  color: #d7eee2;
+}
+
+.chatRole {
+  display: block;
+  color: #65716b;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.coachComposer {
+  border-top: 1px solid #e0e7e3;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.coachComposer textarea {
+  min-height: 72px;
+}
+
 .coachResult {
   margin-top: 14px;
   border-top: 1px solid #e0e7e3;
@@ -311,5 +365,6 @@ li { margin-bottom: 6px; }
 @media (max-width: 560px) {
   .topbar, .calendarItem { flex-direction: column; align-items: stretch; }
   .metricsGrid, .miniGrid, .inlineForm, .metricEntryGrid { grid-template-columns: 1fr; }
+  .chatBubble { max-width: 100%; }
   h1 { font-size: 28px; }
 }
