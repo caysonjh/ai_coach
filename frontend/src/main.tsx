@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Send,
   Settings,
+  SlidersHorizontal,
   Upload
 } from "lucide-react";
 import {
@@ -30,8 +31,15 @@ import "./styles/app.css";
 const sports = ["swim", "bike", "run", "strength", "climb", "mobility", "rest", "other"];
 const sportVariants = ["road_run", "trail_run", "road_ride", "gravel_ride", "mtb_ride", "tt_ride", "pool_swim", "open_water_swim", "strength", "climb", "mobility", "rest", "other"];
 const intensities = ["recovery", "easy", "moderate", "tempo", "threshold", "vo2", "race"];
+const tabs = [
+  { id: "home", label: "Home", icon: ActivityIcon },
+  { id: "gear_places", label: "Gear + Places", icon: MapPin },
+  { id: "system", label: "System", icon: SlidersHorizontal }
+] as const;
+type TabId = (typeof tabs)[number]["id"];
 
 function App() {
+  const [activeTab, setActiveTab] = useState<TabId>("home");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [metrics, setMetrics] = useState<HealthMetric[]>([]);
   const [metricOptions, setMetricOptions] = useState<MetricOption[]>([]);
@@ -98,7 +106,10 @@ function App() {
 
   const focusMetricCards = useMemo(() => {
     const keys = ["training_readiness", "sleep_score", "hrv_ms", "resting_hr", "vo2_max", "ftp", "endurance_score", "body_battery"];
-    return keys.map((key) => [key, dashboard?.latest_metrics[key]] as const).filter(([, value]) => Boolean(value));
+    return keys.flatMap((key) => {
+      const value = dashboard?.latest_metrics[key];
+      return value ? [[key, value] as const] : [];
+    });
   }, [dashboard]);
 
   return (
@@ -114,8 +125,98 @@ function App() {
         </button>
       </header>
 
+      <nav className="tabMenu" aria-label="Primary sections">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              className={activeTab === tab.id ? "active" : ""}
+              onClick={() => setActiveTab(tab.id)}
+              type="button"
+            >
+              <Icon size={17} />
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+
       {message && <div className="notice">{message}</div>}
 
+      {activeTab === "home" && (
+        <HomeView
+          dashboard={dashboard}
+          focusMetricCards={focusMetricCards}
+          coachText={coachText}
+          setCoachText={setCoachText}
+          aggressiveness={aggressiveness}
+          setAggressiveness={setAggressiveness}
+          loading={loading}
+          askCoach={askCoach}
+          coach={coach}
+          applyCoachPlan={applyCoachPlan}
+          workouts={workouts}
+          activities={activities}
+          metrics={metrics}
+          metricOptions={metricOptions}
+          refresh={refresh}
+        />
+      )}
+
+      {activeTab === "gear_places" && (
+        <GearPlacesView
+          gear={gear}
+          locations={locations}
+          locationFeedback={locationFeedback}
+          activities={activities}
+          workouts={workouts}
+          refresh={refresh}
+        />
+      )}
+
+      {activeTab === "system" && (
+        <SystemView refresh={refresh} />
+      )}
+    </main>
+  );
+}
+
+function HomeView({
+  dashboard,
+  focusMetricCards,
+  coachText,
+  setCoachText,
+  aggressiveness,
+  setAggressiveness,
+  loading,
+  askCoach,
+  coach,
+  applyCoachPlan,
+  workouts,
+  activities,
+  metrics,
+  metricOptions,
+  refresh
+}: {
+  dashboard: Dashboard | null;
+  focusMetricCards: readonly (readonly [string, Dashboard["latest_metrics"][string]])[];
+  coachText: string;
+  setCoachText: (value: string) => void;
+  aggressiveness: number;
+  setAggressiveness: (value: number) => void;
+  loading: boolean;
+  askCoach: () => Promise<void>;
+  coach: CoachResponse | null;
+  applyCoachPlan: () => Promise<void>;
+  workouts: PlannedWorkout[];
+  activities: Activity[];
+  metrics: HealthMetric[];
+  metricOptions: MetricOption[];
+  refresh: () => Promise<void>;
+}) {
+  return (
+    <>
       <section className="grid metricsGrid">
         <StatCard icon={<Gauge />} label="7d Volume" value={`${dashboard?.volume_7d_hours ?? 0}h`} />
         <StatCard icon={<ActivityIcon />} label="28d Volume" value={`${dashboard?.volume_28d_hours ?? 0}h`} />
@@ -125,42 +226,8 @@ function App() {
 
       <section className="layout">
         <div className="stack">
-          <Panel title="Training Dashboard" icon={<ActivityIcon />}>
-            <div className="split">
-              <div>
-                <h3>Discipline Split</h3>
-                <div className="barList">
-                  {Object.entries(dashboard?.discipline_hours_7d ?? {}).map(([sport, hours]) => (
-                    <div key={sport} className="barRow">
-                      <span>{sport}</span>
-                      <div><span style={{ width: `${Math.min(100, hours * 18)}%` }} /></div>
-                      <strong>{hours}h</strong>
-                    </div>
-                  ))}
-                  {!Object.keys(dashboard?.discipline_hours_7d ?? {}).length && <p className="muted">No recent activities yet.</p>}
-                </div>
-              </div>
-              <div>
-                <h3>Key Health Metrics</h3>
-                <div className="miniGrid">
-                  {focusMetricCards.map(([key, value]) => (
-                    <div className="miniCard" key={key}>
-                      <span>{labelize(key)}</span>
-                      <strong>{String(value?.value)} {value?.unit ?? ""}</strong>
-                      <small>{value?.date} · {value?.source}</small>
-                    </div>
-                  ))}
-                  {!focusMetricCards.length && <p className="muted">Manual Garmin-style metrics will appear here.</p>}
-                </div>
-              </div>
-            </div>
-            {!!dashboard?.recovery_flags.length && (
-              <div className="warningList">
-                {dashboard.recovery_flags.map((flag) => <p key={flag}>{flag}</p>)}
-              </div>
-            )}
-          </Panel>
-
+          <TrainingDashboardPanel dashboard={dashboard} focusMetricCards={focusMetricCards} />
+          <CalendarPanel workouts={workouts} refresh={refresh} />
           <CoachPanel
             coachText={coachText}
             setCoachText={setCoachText}
@@ -171,22 +238,96 @@ function App() {
             coach={coach}
             applyCoachPlan={applyCoachPlan}
           />
-
-          <CalendarPanel workouts={workouts} refresh={refresh} />
-          <PlacesPanel locations={locations} feedback={locationFeedback} activities={activities} workouts={workouts} refresh={refresh} />
         </div>
 
         <aside className="stack">
-          <ManualMetricPanel options={metricOptions} refresh={refresh} />
-          <GearPanel gear={gear} refresh={refresh} />
-          <LocalFilesPanel refresh={refresh} />
-          <OllamaPanel />
-          <ConnectorPanel />
           <ActivityPanel activities={activities} />
+          <ManualMetricPanel options={metricOptions} refresh={refresh} />
           <RecentMetrics metrics={metrics} />
         </aside>
       </section>
-    </main>
+    </>
+  );
+}
+
+function TrainingDashboardPanel({
+  dashboard,
+  focusMetricCards
+}: {
+  dashboard: Dashboard | null;
+  focusMetricCards: readonly (readonly [string, Dashboard["latest_metrics"][string]])[];
+}) {
+  return (
+    <Panel title="Training Dashboard" icon={<ActivityIcon />}>
+      <div className="split">
+        <div>
+          <h3>Discipline Split</h3>
+          <div className="barList">
+            {Object.entries(dashboard?.discipline_hours_7d ?? {}).map(([sport, hours]) => (
+              <div key={sport} className="barRow">
+                <span>{sport}</span>
+                <div><span style={{ width: `${Math.min(100, hours * 18)}%` }} /></div>
+                <strong>{hours}h</strong>
+              </div>
+            ))}
+            {!Object.keys(dashboard?.discipline_hours_7d ?? {}).length && <p className="muted">No recent activities yet.</p>}
+          </div>
+        </div>
+        <div>
+          <h3>Key Health Metrics</h3>
+          <div className="miniGrid">
+            {focusMetricCards.map(([key, value]) => (
+              <div className="miniCard" key={key}>
+                <span>{labelize(key)}</span>
+                <strong>{String(value?.value)} {value?.unit ?? ""}</strong>
+                <small>{value?.date} · {value?.source}</small>
+              </div>
+            ))}
+            {!focusMetricCards.length && <p className="muted">Manual Garmin-style metrics will appear here.</p>}
+          </div>
+        </div>
+      </div>
+      {!!dashboard?.recovery_flags.length && (
+        <div className="warningList">
+          {dashboard.recovery_flags.map((flag) => <p key={flag}>{flag}</p>)}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function GearPlacesView({
+  gear,
+  locations,
+  locationFeedback,
+  activities,
+  workouts,
+  refresh
+}: {
+  gear: GearItem[];
+  locations: TrainingLocation[];
+  locationFeedback: LocationFeedback[];
+  activities: Activity[];
+  workouts: PlannedWorkout[];
+  refresh: () => Promise<void>;
+}) {
+  return (
+    <section className="layout equalLayout">
+      <GearPanel gear={gear} refresh={refresh} />
+      <PlacesPanel locations={locations} feedback={locationFeedback} activities={activities} workouts={workouts} refresh={refresh} />
+    </section>
+  );
+}
+
+function SystemView({ refresh }: { refresh: () => Promise<void> }) {
+  return (
+    <section className="layout equalLayout">
+      <OllamaPanel />
+      <div className="stack">
+        <ConnectorPanel />
+        <LocalFilesPanel refresh={refresh} />
+      </div>
+    </section>
   );
 }
 
