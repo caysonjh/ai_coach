@@ -299,15 +299,15 @@ class CoachService:
             "adjust",
             "reschedule",
         )
-        if any(term in normalized for term in planning_terms):
-            return "planning"
         if any(term in normalized for term in analysis_terms):
             return "analysis"
-        recent_user_text = " ".join(item.content.lower() for item in history[-4:] if getattr(item, "role", "") == "user")
-        if any(term in recent_user_text for term in planning_terms):
+        if any(term in normalized for term in planning_terms):
             return "planning"
+        recent_user_text = " ".join(item.content.lower() for item in history[-4:] if getattr(item, "role", "") == "user")
         if any(term in recent_user_text for term in analysis_terms):
             return "analysis"
+        if any(term in recent_user_text for term in planning_terms):
+            return "planning"
         return "coaching_chat"
 
     def _aggressiveness_guidance(self, aggressiveness: float) -> str:
@@ -377,10 +377,38 @@ class CoachService:
             f"{summary['volume_7d_hours']} hours, split={summary['discipline_hours_7d']}. "
             f"Sessions: {'; '.join(activity_summaries) if activity_summaries else 'none'}."
         )
-        result["title"] = result.get("title") or "Past Week Training Analysis"
-        result["summary"] = f"{data_summary}\n\n{result.get('summary', '')}".strip()
+        result["title"] = "Past Week Training Analysis"
+        result["summary"] = self._analysis_summary(data_summary, result)
+        result["recommendations"] = self._analysis_recommendations(digest, summary)
+        result["risks"] = summary.get("recovery_flags", [])
         result["proposed_workouts"] = []
         return result
+
+    def _analysis_summary(self, data_summary: str, result: dict[str, Any]) -> str:
+        model_summary = str(result.get("summary", "")).strip()
+        generic_fragments = (
+            "training plan is designed",
+            "build a stable week",
+            "propose a simple",
+            "workout for tomorrow",
+        )
+        if not model_summary or any(fragment in model_summary.lower() for fragment in generic_fragments):
+            return data_summary
+        return f"{data_summary}\n\nCoach interpretation: {model_summary}"
+
+    def _analysis_recommendations(self, digest: dict[str, Any], summary: dict) -> list[str]:
+        by_sport = digest["by_sport"]
+        recommendations = [
+            f"Sport balance this week: {by_sport}.",
+            "Use this review to decide what the next block needs; do not add workouts until you ask for planning.",
+        ]
+        if not by_sport.get("swim"):
+            recommendations.append("Swim frequency is absent in the last 7 days, so note that as a triathlon-specific gap.")
+        if by_sport.get("run", {}).get("hours", 0) > by_sport.get("bike", {}).get("hours", 0) * 1.2:
+            recommendations.append("Run load is relatively high versus bike load; watch lower-leg fatigue before adding intensity.")
+        if summary.get("recovery_flags"):
+            recommendations.append("Recovery flags are present, so interpret the week through fatigue and readiness first.")
+        return recommendations
 
     def _ground_planning_result(
         self,

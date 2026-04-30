@@ -47,6 +47,14 @@ def test_more_aggressive_message_increases_effective_aggressiveness() -> None:
     assert service._effective_aggressiveness("Make it easier", 0.45) == 0.25
 
 
+def test_analyze_my_workouts_is_analysis_not_planning() -> None:
+    service = CoachService()
+
+    assert service._classify_request("Analyze my workouts from the past week", []) == "analysis"
+    assert service._classify_request("Review my workouts from the past week", []) == "analysis"
+    assert service._classify_request("Plan my workouts for the rest of the week", []) == "planning"
+
+
 def test_analysis_guard_strips_model_workouts_and_adds_data_summary() -> None:
     service = CoachService()
     model_result = {
@@ -84,8 +92,11 @@ def test_analysis_guard_strips_model_workouts_and_adds_data_summary() -> None:
     grounded = service._ground_analysis_result(model_result, activities, summary, date(2026, 4, 30))
 
     assert grounded["proposed_workouts"] == []
+    assert grounded["title"] == "Past Week Training Analysis"
     assert "Past 7 days from imported data" in grounded["summary"]
     assert "First Newport Run" in grounded["summary"]
+    assert "Build a stable week" not in grounded["summary"]
+    assert all("tomorrow" not in item.lower() for item in grounded["recommendations"])
 
 
 def test_planning_guard_replaces_stale_generic_ollama_plan() -> None:
