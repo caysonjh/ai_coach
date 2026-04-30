@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "AI Coach"
     database_url: str = "sqlite:///./ai_coach.db"
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "gpt-oss:20b"
+    ollama_model: str = "llama3.1:latest"
     ollama_embed_model: str = "embeddinggemma"
     app_secret: str = "dev-only-change-me"
     strava_client_id: str = ""

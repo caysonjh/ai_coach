@@ -55,16 +55,16 @@ Open `http://localhost:5173`.
 Install and run Ollama locally, then pull models:
 
 ```bash
-ollama pull gpt-oss:20b
+ollama pull llama3.1
 ollama pull embeddinggemma
 ```
 
 The backend defaults to `http://localhost:11434`.
 
-Recommended model: `gpt-oss:20b`. It is the best default for this app because training
-planning needs structured output, reasoning, and tool-style workflows. Use `qwen3:8b`
-if you need a lighter/faster local model, and consider `gpt-oss:120b` only on very
-large hardware.
+Recommended model for a 16 GB Apple Silicon laptop: `llama3.1:latest`. It is the
+current reliable default for local testing. `gpt-oss:20b` is installed-capable but
+may crash or slow down on 16 GB machines; use it only as an experimental quality
+target if you have enough memory headroom.
 
 ## Local Garmin Files
 

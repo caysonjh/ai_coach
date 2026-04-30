@@ -75,11 +75,11 @@ async def ollama_ensure() -> OllamaStatus:
 @router.get("/ollama/recommendation", response_model=ModelRecommendation)
 def ollama_recommendation() -> ModelRecommendation:
     return ModelRecommendation(
-        recommended="gpt-oss:20b",
+        recommended="llama3.1:latest",
         rationale=(
-            "Best default for this coaching app because it is built for reasoning, structured "
-            "outputs, and agentic/tool-style workflows while still being realistic on local "
-            "hardware with enough memory."
+            "Best reliable default for a 16 GB Apple Silicon laptop in this app. It is fast "
+            "enough for interactive testing, supports structured JSON well enough for the coach, "
+            "and avoids the local runner crashes seen with larger models on constrained memory."
         ),
         alternatives=[
             {
@@ -87,16 +87,16 @@ def ollama_recommendation() -> ModelRecommendation:
                 "use_case": "Faster, lighter fallback if gpt-oss:20b is too slow.",
             },
             {
-                "model": "gemma3:12b",
-                "use_case": "Good general assistant with long context and lower memory demand.",
+                "model": "gemma4:e4b",
+                "use_case": "Installed local alternative worth testing for coaching tone and speed.",
+            },
+            {
+                "model": "gpt-oss:20b",
+                "use_case": "Higher-reasoning target, but likely too heavy for stable 16 GB laptop use.",
             },
             {
                 "model": "gpt-oss:120b",
-                "use_case": "Highest-quality local option if you have very large GPU/RAM headroom.",
-            },
-            {
-                "model": "llama3.3:70b",
-                "use_case": "Strong chat model, but heavy and less targeted to structured agentic planning.",
+                "use_case": "Not recommended on this machine; requires much larger memory headroom.",
             },
         ],
     )

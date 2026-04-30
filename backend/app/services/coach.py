@@ -92,6 +92,8 @@ class CoachService:
             "swim": rank_locations(locations, feedback, Sport.swim, SportVariant.pool_swim, "technique"),
         }
         context = {
+            "current_date": today.isoformat(),
+            "week_start": week_start.isoformat(),
             "profile": profile.model_dump() if profile else {},
             "training_summary": summary,
             "recent_activities": [activity.model_dump() for activity in activities[-20:]],
@@ -113,8 +115,11 @@ class CoachService:
             "You are a precise triathlon coach for an aspiring elite age-group 70.3 athlete. "
             "Account for R-CPD GI risk, chronic fatigue syndrome, strength, climbing, sleep, "
             "manual Garmin-style health metrics, gear mileage, local training places, and schedule constraints. "
+            "Use only these sport values in proposed_workouts: swim, bike, run, strength, climb, mobility, rest, other. "
+            "Use only these sport_variant values: road_run, trail_run, road_ride, gravel_ride, mtb_ride, tt_ride, pool_swim, open_water_swim, strength, climb, mobility, rest, other. "
             "Use trail running, gravel cycling, and MTB only as controlled substitutions that preserve the intended triathlon stimulus. "
             "For run and bike workouts, suggest gear when gear context exists. For workouts where place context exists, suggest a location. Propose changes but "
+            f"Today is {today.isoformat()}; interpret relative dates like tomorrow from that date and do not propose past dates. "
             "do not assume approval. Return only valid JSON matching the schema."
         )
         result = await self.ollama.chat_json(
@@ -167,8 +172,8 @@ class CoachService:
                 workouts.append(
                     PlannedWorkoutCreate(
                         planned_date=date.fromisoformat(str(item["planned_date"])),
-                        sport=Sport(item["sport"]),
-                        sport_variant=SportVariant(item.get("sport_variant", "other")),
+                        sport=self._coerce_sport(item.get("sport", "other")),
+                        sport_variant=self._coerce_sport_variant(item.get("sport_variant", item.get("sport", "other"))),
                         title=item["title"],
                         description=item.get("description", ""),
                         duration_minutes=item.get("duration_minutes"),
@@ -192,6 +197,50 @@ class CoachService:
             used_ollama=used_ollama,
             raw=result,
         )
+
+    def _coerce_sport(self, value: str) -> Sport:
+        normalized = str(value).lower().replace(" ", "_")
+        aliases = {
+            "ride": Sport.bike,
+            "cycling": Sport.bike,
+            "cycle": Sport.bike,
+            "gravel": Sport.bike,
+            "mtb": Sport.bike,
+            "mountain_bike": Sport.bike,
+            "running": Sport.run,
+            "trail": Sport.run,
+            "swimming": Sport.swim,
+        }
+        if normalized in aliases:
+            return aliases[normalized]
+        try:
+            return Sport(normalized)
+        except ValueError:
+            return Sport.other
+
+    def _coerce_sport_variant(self, value: str) -> SportVariant:
+        normalized = str(value).lower().replace(" ", "_")
+        aliases = {
+            "ride": SportVariant.road_ride,
+            "bike": SportVariant.road_ride,
+            "cycling": SportVariant.road_ride,
+            "gravel": SportVariant.gravel_ride,
+            "gravel_ride": SportVariant.gravel_ride,
+            "mtb": SportVariant.mtb_ride,
+            "mountain_bike": SportVariant.mtb_ride,
+            "run": SportVariant.road_run,
+            "running": SportVariant.road_run,
+            "trail": SportVariant.trail_run,
+            "trail_run": SportVariant.trail_run,
+            "swim": SportVariant.pool_swim,
+            "swimming": SportVariant.pool_swim,
+        }
+        if normalized in aliases:
+            return aliases[normalized]
+        try:
+            return SportVariant(normalized)
+        except ValueError:
+            return SportVariant.other
 
     def _fallback_response(self, request: CoachRequest, summary: dict, week_start: date) -> dict[str, Any]:
         recovery_bias = request.aggressiveness < 0.35 or bool(summary.get("recovery_flags"))
