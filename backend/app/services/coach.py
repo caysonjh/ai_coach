@@ -19,10 +19,17 @@ from app.models.entities import (
     TrainingLocation,
     WorkoutLocationFeedback,
 )
-from app.schemas.api import CoachRequest, CoachResponse, PlannedWorkoutCreate
+from app.schemas.api import (
+    CoachActionEndpoint,
+    CoachContextResponse,
+    CoachRecordRequest,
+    CoachRecordResponse,
+    CoachRequest,
+    CoachResponse,
+    PlannedWorkoutCreate,
+)
 from app.services.analytics import summarize_training
 from app.services.athlete_context import me_markdown_path, read_me_markdown
-from app.services.ollama import OllamaClient
 from app.services.recommendations import rank_locations
 from app.services.state_export import export_coach_context
 
@@ -63,121 +70,32 @@ COACH_SCHEMA: dict[str, Any] = {
 
 class CoachService:
     def __init__(self) -> None:
-        self.ollama = OllamaClient()
+        self.action_endpoints = [
+            CoachActionEndpoint(
+                name="coach_context",
+                method="POST",
+                path="/api/chatgpt/context",
+                purpose="Fetch grounded training context, summary, and recent training data before answering.",
+            ),
+            CoachActionEndpoint(
+                name="coach_record",
+                method="POST",
+                path="/api/chatgpt/record",
+                purpose="Persist a ChatGPT-authored coach response, insight, and proposed plan.",
+            ),
+            CoachActionEndpoint(
+                name="apply_workouts",
+                method="POST",
+                path="/api/coach/apply-workouts",
+                purpose="Apply approved workouts to the calendar after the user accepts a plan.",
+            ),
+        ]
 
     async def respond(self, session: Session, request: CoachRequest) -> CoachResponse:
-        today = date.today()
-        week_start = request.week_start or today - timedelta(days=today.weekday())
-        since = today - timedelta(days=56)
-
-        profile = session.exec(select(AthleteProfile).limit(1)).first()
-        activities = session.exec(
-            select(Activity).where(Activity.start_time >= datetime.combine(since, time.min)).order_by(Activity.start_time.asc())
-        ).all()
-        metrics = session.exec(select(HealthMetric).where(HealthMetric.metric_date >= since).order_by(HealthMetric.metric_date.asc())).all()
-        planned = session.exec(select(PlannedWorkout).where(PlannedWorkout.planned_date >= week_start).order_by(PlannedWorkout.planned_date.asc())).all()
-        constraints = session.exec(
-            select(ScheduleConstraint).where(ScheduleConstraint.constraint_date >= week_start)
-        ).all()
-        memories = session.exec(select(CoachMemory).order_by(CoachMemory.importance.desc()).limit(12)).all()
-        locations = session.exec(select(TrainingLocation).where(TrainingLocation.active == True)).all()  # noqa: E712
-        feedback = session.exec(select(WorkoutLocationFeedback).order_by(WorkoutLocationFeedback.feedback_date.desc()).limit(50)).all()
-        gear = session.exec(select(GearItem).where(GearItem.active == True)).all()  # noqa: E712
-        me_markdown = read_me_markdown()
-
-        summary = summarize_training(activities, metrics, planned, today=today)
-        effective_aggressiveness = self._effective_aggressiveness(request.message, request.aggressiveness)
-        suggested_places = {
-            "run": rank_locations(locations, feedback, Sport.run, SportVariant.road_run, "easy"),
-            "trail_run": rank_locations(locations, feedback, Sport.run, SportVariant.trail_run, "easy"),
-            "ride": rank_locations(locations, feedback, Sport.bike, SportVariant.road_ride, "endurance"),
-            "gravel": rank_locations(locations, feedback, Sport.bike, SportVariant.gravel_ride, "endurance"),
-            "swim": rank_locations(locations, feedback, Sport.swim, SportVariant.pool_swim, "technique"),
-        }
-        request_intent = self._classify_request(request.message, request.conversation_history)
-        context = {
-            "current_date": today.isoformat(),
-            "week_start": week_start.isoformat(),
-            "request_intent": request_intent,
-            "requested_aggressiveness": request.aggressiveness,
-            "effective_aggressiveness": effective_aggressiveness,
-            "aggressiveness_guidance": self._aggressiveness_guidance(effective_aggressiveness),
-            "profile": profile.model_dump() if profile else {},
-            "athlete_profile_markdown": me_markdown,
-            "athlete_profile_markdown_path": str(me_markdown_path()) if me_markdown else "",
-            "training_summary": summary,
-            "past_7_days_activity_digest": self._activity_digest(activities, today - timedelta(days=7)),
-            "recent_activities": [activity.model_dump() for activity in activities[-20:]],
-            "recent_health_metrics": [metric.model_dump() for metric in metrics[-40:]],
-            "planned_workouts": [workout.model_dump() for workout in planned[:30]],
-            "schedule_constraints": [constraint.model_dump() for constraint in constraints],
-            "training_locations": [location.model_dump() for location in locations],
-            "recent_location_feedback": [item.model_dump() for item in feedback],
-            "ranked_location_suggestions": suggested_places,
-            "gear": [item.model_dump() for item in gear],
-            "memories": [memory.content for memory in memories],
-            "conversation_history": [
-                {"role": item.role, "content": item.content}
-                for item in request.conversation_history[-12:]
-                if item.role in {"user", "assistant"} and item.content.strip()
-            ],
-            "controls": {
-                "aggressiveness": effective_aggressiveness,
-                "autonomy": request.autonomy,
-            },
-        }
-
-        system = (
-            "You are a precise triathlon coach for an aspiring elite age-group 70.3 athlete. "
-            "Account for R-CPD GI risk, chronic fatigue syndrome, strength, climbing, sleep, "
-            "manual Garmin-style health metrics, gear mileage, local training places, and schedule constraints. "
-            "Treat athlete_profile_markdown in the user context as durable first-person background about the athlete's "
-            "goals, constraints, preferences, location, and training history. Use it in every recommendation. "
-            "Answer the user's actual latest request first. If request_intent is analysis, analyze the data that was asked about and set proposed_workouts to an empty array. "
-            "Do not invent or recommend workouts unless the latest message or conversation clearly asks for a plan, schedule, next workout, or workout adjustment. "
-            "If request_intent is planning, use aggressiveness_guidance as a hard planning constraint: higher aggressiveness should produce meaningfully more load, specificity, or intensity, while still respecting recovery flags. "
-            "When asked to analyze a past week, cite specific activities, approximate durations/distances, discipline balance, load pattern, strengths, gaps, and recovery implications from recent_activities and past_7_days_activity_digest. "
-            "Use only these sport values in proposed_workouts: swim, bike, run, strength, climb, mobility, rest, other. "
-            "Use only these sport_variant values: road_run, trail_run, road_ride, gravel_ride, mtb_ride, tt_ride, pool_swim, open_water_swim, strength, climb, mobility, rest, other. "
-            "Use trail running, gravel cycling, and MTB only as controlled substitutions that preserve the intended triathlon stimulus. "
-            "For run and bike workouts, suggest gear when gear context exists. For workouts where place context exists, suggest a location. "
-            f"Today is {today.isoformat()}; interpret relative dates like tomorrow from that date and do not propose past dates. "
-            "do not assume approval. Return only valid JSON matching the schema."
-        )
-        result = await self.ollama.chat_json(
-            [
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": (
-                        "Use the provided context and conversation_history to answer the latest message. "
-                        "Maintain continuity with the chat while still basing training advice on current data.\n"
-                        f"Latest message: {request.message}\nContext: {context}"
-                    ),
-                },
-            ],
-            COACH_SCHEMA,
-        )
-
-        used_ollama = result is not None
-        if result is None:
-            result = self._fallback_response(request, summary, week_start, activities, request_intent, effective_aggressiveness)
-        elif request_intent == "analysis":
-            result = self._ground_analysis_result(result, activities, summary, today)
-        elif request_intent == "planning":
-            result = self._ground_planning_result(
-                result,
-                request,
-                summary,
-                week_start,
-                activities,
-                today,
-                effective_aggressiveness,
-            )
-
-        response = self._coerce_response(result, used_ollama)
+        workspace = self._build_workspace(session, request)
+        response = self._preview_response(request, workspace)
         insight = CoachInsight(
-            insight_date=today,
+            insight_date=workspace["today"],
             title=response.title,
             summary=response.summary,
             recommendations=response.recommendations,
@@ -194,10 +112,10 @@ class CoachService:
         )
         session.add(
             PlanVersion(
-                week_start=week_start,
+                week_start=workspace["week_start"],
                 status="proposed",
                 rationale=response.summary,
-                aggressiveness=effective_aggressiveness,
+                aggressiveness=workspace["effective_aggressiveness"],
                 autonomy=request.autonomy,
                 payload=response.model_dump(mode="json"),
             )
@@ -205,6 +123,88 @@ class CoachService:
         session.commit()
         export_coach_context(session)
         return response
+
+    def build_context(self, session: Session, request: CoachRequest) -> CoachContextResponse:
+        workspace = self._build_workspace(session, request)
+        return CoachContextResponse(
+            generated_at=datetime.utcnow(),
+            current_date=workspace["today"],
+            week_start=workspace["week_start"],
+            request_intent=workspace["request_intent"],
+            effective_aggressiveness=workspace["effective_aggressiveness"],
+            athlete_profile=workspace["profile"].model_dump() if workspace["profile"] else {},
+            athlete_profile_markdown=workspace["athlete_profile_markdown"],
+            training_summary=workspace["summary"],
+            past_7_days_activity_digest=workspace["past_7_days_activity_digest"],
+            recent_activities=[activity.model_dump() for activity in workspace["activities"][-20:]],
+            recent_health_metrics=[metric.model_dump() for metric in workspace["metrics"][-40:]],
+            planned_workouts=[workout.model_dump() for workout in workspace["planned"][:30]],
+            schedule_constraints=[constraint.model_dump() for constraint in workspace["constraints"]],
+            training_locations=[location.model_dump() for location in workspace["locations"]],
+            recent_location_feedback=[item.model_dump() for item in workspace["feedback"]],
+            ranked_location_suggestions=workspace["ranked_location_suggestions"],
+            gear=[item.model_dump() for item in workspace["gear"]],
+            memories=[memory.content for memory in workspace["memories"]],
+            coach_guidance=self._coach_guidance(workspace),
+            action_endpoints=self.action_endpoints,
+        )
+
+    def record_coach_result(self, session: Session, request: CoachRecordRequest) -> CoachRecordResponse:
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        applied = 0
+
+        insight = CoachInsight(
+            insight_date=today,
+            title=request.title,
+            summary=request.summary,
+            recommendations=request.recommendations,
+            risks=request.risks,
+            raw_payload={
+                "source_message": request.source_message,
+                "rationale": request.rationale,
+                "autonomy": request.autonomy,
+                "aggressiveness": request.aggressiveness,
+                "proposed_workouts": [item.model_dump(mode="json") for item in request.proposed_workouts],
+                "persist_workouts": request.persist_workouts,
+            },
+        )
+        session.add(insight)
+        session.add(
+            CoachMemory(
+                memory_type="chatgpt_result",
+                content=f"{request.source_message}\n{request.summary}",
+                importance=0.7,
+            )
+        )
+        session.add(
+            PlanVersion(
+                week_start=week_start,
+                status="approved" if request.persist_workouts else "proposed",
+                rationale=request.rationale or request.summary,
+                aggressiveness=request.aggressiveness,
+                autonomy=request.autonomy,
+                payload={
+                    "title": request.title,
+                    "summary": request.summary,
+                    "recommendations": request.recommendations,
+                    "risks": request.risks,
+                    "proposed_workouts": [item.model_dump(mode="json") for item in request.proposed_workouts],
+                },
+            )
+        )
+        if request.persist_workouts:
+            for workout in request.proposed_workouts:
+                session.add(PlannedWorkout(**workout.model_dump()))
+                applied += 1
+        session.commit()
+        export_coach_context(session)
+        return CoachRecordResponse(
+            saved_insight=True,
+            saved_plan_version=True,
+            applied_workouts=applied,
+            message="Coach result recorded.",
+        )
 
     def _coerce_response(self, result: dict[str, Any], used_ollama: bool) -> CoachResponse:
         workouts: list[PlannedWorkoutCreate] = []
@@ -238,6 +238,124 @@ class CoachService:
             used_ollama=used_ollama,
             raw=result,
         )
+
+    def _build_workspace(self, session: Session, request: CoachRequest) -> dict[str, Any]:
+        today = date.today()
+        week_start = request.week_start or today - timedelta(days=today.weekday())
+        since = today - timedelta(days=56)
+
+        profile = session.exec(select(AthleteProfile).limit(1)).first()
+        activities = session.exec(
+            select(Activity).where(Activity.start_time >= datetime.combine(since, time.min)).order_by(Activity.start_time.asc())
+        ).all()
+        metrics = session.exec(select(HealthMetric).where(HealthMetric.metric_date >= since).order_by(HealthMetric.metric_date.asc())).all()
+        planned = session.exec(select(PlannedWorkout).where(PlannedWorkout.planned_date >= week_start).order_by(PlannedWorkout.planned_date.asc())).all()
+        constraints = session.exec(
+            select(ScheduleConstraint).where(ScheduleConstraint.constraint_date >= week_start)
+        ).all()
+        memories = session.exec(select(CoachMemory).order_by(CoachMemory.importance.desc()).limit(12)).all()
+        locations = session.exec(select(TrainingLocation).where(TrainingLocation.active == True)).all()  # noqa: E712
+        feedback = session.exec(select(WorkoutLocationFeedback).order_by(WorkoutLocationFeedback.feedback_date.desc()).limit(50)).all()
+        gear = session.exec(select(GearItem).where(GearItem.active == True)).all()  # noqa: E712
+        me_markdown = read_me_markdown()
+
+        summary = summarize_training(activities, metrics, planned, today=today)
+        effective_aggressiveness = self._effective_aggressiveness(request.message, request.aggressiveness)
+        suggested_places = {
+            "run": rank_locations(locations, feedback, Sport.run, SportVariant.road_run, "easy"),
+            "trail_run": rank_locations(locations, feedback, Sport.run, SportVariant.trail_run, "easy"),
+            "ride": rank_locations(locations, feedback, Sport.bike, SportVariant.road_ride, "endurance"),
+            "gravel": rank_locations(locations, feedback, Sport.bike, SportVariant.gravel_ride, "endurance"),
+            "swim": rank_locations(locations, feedback, Sport.swim, SportVariant.pool_swim, "technique"),
+        }
+        request_intent = self._classify_request(request.message, request.conversation_history)
+        return {
+            "today": today,
+            "week_start": week_start,
+            "profile": profile,
+            "activities": activities,
+            "metrics": metrics,
+            "planned": planned,
+            "constraints": constraints,
+            "memories": memories,
+            "locations": locations,
+            "feedback": feedback,
+            "gear": gear,
+            "summary": summary,
+            "effective_aggressiveness": effective_aggressiveness,
+            "ranked_location_suggestions": suggested_places,
+            "request_intent": request_intent,
+            "athlete_profile_markdown": me_markdown,
+            "past_7_days_activity_digest": self._activity_digest(activities, today - timedelta(days=7)),
+        }
+
+    def _coach_guidance(self, workspace: dict[str, Any]) -> list[str]:
+        summary = workspace["summary"]
+        guidance = [
+            f"Current training load: {summary['volume_7d_hours']} hours in 7 days, {summary['volume_28d_hours']} hours in 28 days.",
+            f"Request intent classified as {workspace['request_intent']}; use that mode before generating a reply.",
+            f"Current aggressiveness target: {self._aggressiveness_guidance(workspace['effective_aggressiveness'])}",
+            "Prefer specific guidance grounded in recent activities, metrics, places, gear, and constraints.",
+        ]
+        if summary.get("recovery_flags"):
+            guidance.append("Recovery flags are present, so caution should override generic progression.")
+        return guidance
+
+    def _preview_response(self, request: CoachRequest, workspace: dict[str, Any]) -> CoachResponse:
+        request_intent = workspace["request_intent"]
+        summary = workspace["summary"]
+        activities = workspace["activities"]
+        week_start = workspace["week_start"]
+        today = workspace["today"]
+        effective_aggressiveness = workspace["effective_aggressiveness"]
+
+        if request_intent == "analysis":
+            result = self._fallback_response(
+                request,
+                summary,
+                week_start,
+                activities,
+                request_intent=request_intent,
+                effective_aggressiveness=effective_aggressiveness,
+            )
+            return self._coerce_response(result, used_ollama=False)
+
+        if request_intent == "planning":
+            result = self._fallback_response(
+                request,
+                summary,
+                week_start,
+                activities,
+                request_intent=request_intent,
+                effective_aggressiveness=effective_aggressiveness,
+            )
+            return self._coerce_response(result, used_ollama=False)
+
+        result = {
+            "title": "Current Training Briefing",
+            "summary": (
+                f"Your current load is {summary['volume_7d_hours']} hours over the last 7 days and "
+                f"{summary['volume_28d_hours']} hours over the last 28 days. "
+                f"The latest request '{request.message.strip()}' was treated as a coaching conversation rather than a plan request. "
+                f"Use {today.isoformat()} as the anchor date and keep the advice grounded in recent activities, health metrics, places, and constraints."
+            ),
+            "recommendations": self._chat_recommendations(workspace),
+            "risks": summary.get("recovery_flags", []) or ["No recovery flags detected in the current summary."],
+            "proposed_workouts": [],
+        }
+        return self._coerce_response(result, used_ollama=False)
+
+    def _chat_recommendations(self, workspace: dict[str, Any]) -> list[str]:
+        summary = workspace["summary"]
+        recommendations = [
+            f"Recent sport balance: {summary['discipline_hours_7d']}.",
+            "Use the action context to generate an answer that cites specific recent sessions and current readiness.",
+        ]
+        if not summary["discipline_hours_7d"].get("swim"):
+            recommendations.append("Swim volume is currently absent or low relative to the rest of the week.")
+        if workspace["past_7_days_activity_digest"]["by_sport"].get("run", {}).get("hours", 0) > workspace["past_7_days_activity_digest"]["by_sport"].get("bike", {}).get("hours", 0) * 1.2:
+            recommendations.append("Run load is outpacing bike load; watch lower-leg fatigue when increasing intensity.")
+        return recommendations
 
     def _coerce_sport(self, value: str) -> Sport:
         normalized = str(value).lower().replace(" ", "_")

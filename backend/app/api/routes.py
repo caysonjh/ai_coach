@@ -1,6 +1,9 @@
 from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 from sqlmodel import Session, select
 
 from app.connectors.garmin import garmin_status
@@ -22,6 +25,10 @@ from app.schemas.api import (
     ActivityCreate,
     CoachRequest,
     CoachResponse,
+    CoachContextResponse,
+    CoachRecordRequest,
+    CoachRecordResponse,
+    ChatGPTActionsStatus,
     ContextExportResponse,
     GarminImportStatus,
     GearItemCreate,
@@ -43,6 +50,16 @@ from app.services.ollama import OllamaClient, OllamaStatus
 from app.services.state_export import export_coach_context
 
 router = APIRouter(prefix="/api")
+chatgpt_bearer = HTTPBearer(auto_error=False)
+
+
+def require_chatgpt_token(credentials: HTTPAuthorizationCredentials | None = Depends(chatgpt_bearer)) -> None:
+    settings = get_settings()
+    expected = settings.chatgpt_action_token.strip()
+    if not expected:
+        return
+    if not credentials or credentials.scheme.lower() != "bearer" or credentials.credentials != expected:
+        raise HTTPException(status_code=401, detail="Invalid ChatGPT action token")
 
 
 @router.get("/health")
@@ -296,6 +313,62 @@ def create_constraint(
 @router.post("/coach", response_model=CoachResponse)
 async def coach(payload: CoachRequest, session: Session = Depends(get_session)) -> CoachResponse:
     return await CoachService().respond(session, payload)
+
+
+@router.get("/chatgpt/status", response_model=ChatGPTActionsStatus)
+def chatgpt_status() -> ChatGPTActionsStatus:
+    """Describe the public ChatGPT action setup expected for this backend."""
+    settings = get_settings()
+    enabled = bool(settings.chatgpt_action_token.strip())
+    base_url = settings.chatgpt_public_base_url.rstrip("/")
+    return ChatGPTActionsStatus(
+        enabled=enabled,
+        auth_required=enabled,
+        public_base_url=settings.chatgpt_public_base_url,
+        openapi_url=f"{base_url}/openapi.json" if base_url else "/openapi.json",
+        actions_openapi_url=f"{base_url}/api/chatgpt/openapi.json" if base_url else "/api/chatgpt/openapi.json",
+        context_path="/api/chatgpt/context",
+        record_path="/api/chatgpt/record",
+        apply_workouts_path="/api/coach/apply-workouts",
+    )
+
+
+@router.get("/chatgpt/openapi.json")
+def chatgpt_openapi() -> JSONResponse:
+    """Return a trimmed OpenAPI document for ChatGPT action import."""
+    settings = get_settings()
+    spec = get_openapi(
+        title="AI Coach ChatGPT Actions",
+        version="0.1.0",
+        routes=[route for route in router.routes if getattr(route, "path", "").startswith("/api/chatgpt") or getattr(route, "path", "") == "/api/coach/apply-workouts"],
+    )
+    spec["servers"] = [{"url": settings.chatgpt_public_base_url.rstrip("/") or "http://localhost:8000"}]
+    spec["paths"] = {
+        path: operations
+        for path, operations in spec["paths"].items()
+        if path in {"/api/chatgpt/context", "/api/chatgpt/record", "/api/coach/apply-workouts", "/api/chatgpt/status", "/api/chatgpt/openapi.json"}
+    }
+    spec.setdefault("components", {}).setdefault("securitySchemes", {})["bearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+    }
+    for path in ("/api/chatgpt/context", "/api/chatgpt/record", "/api/coach/apply-workouts"):
+        if path in spec["paths"]:
+            for operation in spec["paths"][path].values():
+                operation.setdefault("security", [{"bearerAuth": []}])
+    return JSONResponse(spec)
+
+
+@router.post("/chatgpt/context", response_model=CoachContextResponse, dependencies=[Depends(require_chatgpt_token)])
+def chatgpt_context(payload: CoachRequest, session: Session = Depends(get_session)) -> CoachContextResponse:
+    """Return grounded coach context for a ChatGPT action call."""
+    return CoachService().build_context(session, payload)
+
+
+@router.post("/chatgpt/record", response_model=CoachRecordResponse, dependencies=[Depends(require_chatgpt_token)])
+def chatgpt_record(payload: CoachRecordRequest, session: Session = Depends(get_session)) -> CoachRecordResponse:
+    """Persist a ChatGPT-authored coach response and optional approved workouts."""
+    return CoachService().record_coach_result(session, payload)
 
 
 @router.post("/coach/apply-workouts")

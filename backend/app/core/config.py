@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1:latest"
     ollama_embed_model: str = "embeddinggemma"
+    chatgpt_public_base_url: str = ""
+    chatgpt_action_token: str = ""
     app_secret: str = "dev-only-change-me"
     strava_client_id: str = ""
     strava_client_secret: str = ""

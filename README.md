@@ -1,6 +1,6 @@
 # AI Coach
 
-Local-first AI triathlon coach for training planning, activity analysis, manual Garmin-style health metrics, and Ollama-based insights.
+AI triathlon coach for training planning, activity analysis, manual Garmin-style health metrics, and ChatGPT-native coaching actions.
 
 ## Features
 
@@ -9,7 +9,7 @@ Local-first AI triathlon coach for training planning, activity analysis, manual 
 - Manual health metric entry for sleep score, HRV, resting HR, VO2 Max, FTP, Training Readiness, Training Effect, Endurance Score, Lactate Threshold, Hill Score, and custom metrics.
 - Local Garmin file directory scan for CSV, TCX, GPX, and FIT activity files.
 - In-app calendar for planned workouts and availability constraints.
-- Coach endpoint that uses local Ollama when available and falls back to deterministic guidance when unavailable.
+- Coach workflow that exposes grounded context and write-back actions for a ChatGPT-native coach, with a deterministic local preview path in the web UI.
 - Persistent memory model for goals, accepted plans, insights, and long-term training context.
 - Coach context snapshot export to `coach_context.md` for compact future-session memory.
 
@@ -50,21 +50,51 @@ npm run dev
 
 Open `http://localhost:5173`.
 
+Production backend container:
+
+```bash
+docker build -t ai-coach-backend .
+docker run -p 8000:8000 --env-file .env ai-coach-backend
+```
+
+## ChatGPT Actions
+
+The main coach experience is meant to live inside ChatGPT using a Custom GPT with actions.
+That uses your ChatGPT Plus session for the model and keeps this backend focused on context,
+history, and write-back operations.
+
+Set these environment variables for a deployed backend:
+
+```bash
+CHATGPT_PUBLIC_BASE_URL=https://your-domain.example
+CHATGPT_ACTION_TOKEN=your-long-random-token
+```
+
+Then import the backend OpenAPI document into a Custom GPT and point its action calls at:
+
+- `GET /api/chatgpt/openapi.json`
+- `POST /api/chatgpt/context`
+- `POST /api/chatgpt/record`
+- `POST /api/coach/apply-workouts`
+
+The web UI keeps a deterministic local preview so you can still inspect the current data flow without ChatGPT.
+See [docs/chatgpt-actions.md](docs/chatgpt-actions.md) for the import and smoke-test loop.
+
 ## Ollama
 
-Install and run Ollama locally, then pull models:
+Ollama is now a legacy local preview path only. If you want to use it for offline experimentation,
+install and run it manually, then pull models:
 
 ```bash
 ollama pull llama3.1
 ollama pull embeddinggemma
 ```
 
-The backend defaults to `http://localhost:11434`.
+To verify the ChatGPT action path locally:
 
-Recommended model for a 16 GB Apple Silicon laptop: `llama3.1:latest`. It is the
-current reliable default for local testing. `gpt-oss:20b` is installed-capable but
-may crash or slow down on 16 GB machines; use it only as an experimental quality
-target if you have enough memory headroom.
+```bash
+BASE_URL=http://127.0.0.1:8000 CHATGPT_ACTION_TOKEN=dev-token ./scripts/chatgpt_smoke_test.sh
+```
 
 ## Local Garmin Files
 

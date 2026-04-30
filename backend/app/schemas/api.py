@@ -72,7 +72,7 @@ class CoachChatMessage(BaseModel):
 
 class CoachRequest(BaseModel):
     message: str
-    conversation_history: list[CoachChatMessage] = []
+    conversation_history: list[CoachChatMessage] = Field(default_factory=list)
     week_start: date | None = None
     aggressiveness: float = Field(default=0.45, ge=0, le=1)
     autonomy: str = "suggest_then_approve"
@@ -83,9 +83,70 @@ class CoachResponse(BaseModel):
     summary: str
     recommendations: list[str]
     risks: list[str]
-    proposed_workouts: list[PlannedWorkoutCreate] = []
+    proposed_workouts: list[PlannedWorkoutCreate] = Field(default_factory=list)
     used_ollama: bool
-    raw: dict[str, Any] = {}
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoachActionEndpoint(BaseModel):
+    name: str
+    method: str
+    path: str
+    purpose: str
+
+
+class CoachContextResponse(BaseModel):
+    generated_at: datetime
+    current_date: date
+    week_start: date
+    request_intent: str
+    effective_aggressiveness: float
+    athlete_profile: dict[str, Any]
+    athlete_profile_markdown: str
+    training_summary: dict[str, Any]
+    past_7_days_activity_digest: dict[str, Any]
+    recent_activities: list[dict[str, Any]]
+    recent_health_metrics: list[dict[str, Any]]
+    planned_workouts: list[dict[str, Any]]
+    schedule_constraints: list[dict[str, Any]]
+    training_locations: list[dict[str, Any]]
+    recent_location_feedback: list[dict[str, Any]]
+    ranked_location_suggestions: dict[str, Any]
+    gear: list[dict[str, Any]]
+    memories: list[str]
+    coach_guidance: list[str]
+    action_endpoints: list[CoachActionEndpoint]
+
+
+class CoachRecordRequest(BaseModel):
+    source_message: str
+    title: str
+    summary: str
+    recommendations: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    proposed_workouts: list[PlannedWorkoutCreate] = Field(default_factory=list)
+    rationale: str = ""
+    autonomy: str = "suggest_then_approve"
+    aggressiveness: float = Field(default=0.45, ge=0, le=1)
+    persist_workouts: bool = False
+
+
+class CoachRecordResponse(BaseModel):
+    saved_insight: bool
+    saved_plan_version: bool
+    applied_workouts: int
+    message: str
+
+
+class ChatGPTActionsStatus(BaseModel):
+    enabled: bool
+    auth_required: bool
+    public_base_url: str
+    openapi_url: str
+    actions_openapi_url: str
+    context_path: str
+    record_path: str
+    apply_workouts_path: str
 
 
 class SettingsResponse(BaseModel):

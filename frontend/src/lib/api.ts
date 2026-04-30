@@ -108,6 +108,67 @@ export type CoachResponse = {
   used_ollama: boolean;
 };
 
+export type CoachActionEndpoint = {
+  name: string;
+  method: string;
+  path: string;
+  purpose: string;
+};
+
+export type CoachContextResponse = {
+  generated_at: string;
+  current_date: string;
+  week_start: string;
+  request_intent: string;
+  effective_aggressiveness: number;
+  athlete_profile: Record<string, unknown>;
+  athlete_profile_markdown: string;
+  training_summary: Record<string, unknown>;
+  past_7_days_activity_digest: Record<string, unknown>;
+  recent_activities: Record<string, unknown>[];
+  recent_health_metrics: Record<string, unknown>[];
+  planned_workouts: Record<string, unknown>[];
+  schedule_constraints: Record<string, unknown>[];
+  training_locations: Record<string, unknown>[];
+  recent_location_feedback: Record<string, unknown>[];
+  ranked_location_suggestions: Record<string, unknown>;
+  gear: Record<string, unknown>[];
+  memories: string[];
+  coach_guidance: string[];
+  action_endpoints: CoachActionEndpoint[];
+};
+
+export type ChatGPTActionsStatus = {
+  enabled: boolean;
+  auth_required: boolean;
+  public_base_url: string;
+  openapi_url: string;
+  actions_openapi_url: string;
+  context_path: string;
+  record_path: string;
+  apply_workouts_path: string;
+};
+
+export type CoachRecordRequest = {
+  source_message: string;
+  title: string;
+  summary: string;
+  recommendations: string[];
+  risks: string[];
+  proposed_workouts: PlannedWorkout[];
+  rationale?: string;
+  autonomy?: string;
+  aggressiveness?: number;
+  persist_workouts?: boolean;
+};
+
+export type CoachRecordResponse = {
+  saved_insight: boolean;
+  saved_plan_version: boolean;
+  applied_workouts: number;
+  message: string;
+};
+
 export type CoachChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -182,6 +243,11 @@ export const api = {
     request<PlannedWorkout>(`/api/calendar/workouts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   coach: (payload: Record<string, unknown>) =>
     request<CoachResponse>("/api/coach", { method: "POST", body: JSON.stringify(payload) }),
+  chatgptStatus: () => request<ChatGPTActionsStatus>("/api/chatgpt/status"),
+  chatgptContext: (payload: Record<string, unknown>) =>
+    request<CoachContextResponse>("/api/chatgpt/context", { method: "POST", body: JSON.stringify(payload) }),
+  chatgptRecord: (payload: CoachRecordRequest) =>
+    request<CoachRecordResponse>("/api/chatgpt/record", { method: "POST", body: JSON.stringify(payload) }),
   applyWorkouts: (payload: PlannedWorkout[]) =>
     request<{ applied: number }>("/api/coach/apply-workouts", { method: "POST", body: JSON.stringify(payload) }),
   ollamaStatus: () => request<OllamaStatus>("/api/ollama/status"),
