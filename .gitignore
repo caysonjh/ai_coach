@@ -12,3 +12,6 @@ frontend/dist/
 frontend/.vite/
 garmin_files/
 coach_context.md
+.pids/
+backend.log
+frontend.log

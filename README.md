@@ -15,6 +15,21 @@ Local-first AI triathlon coach for training planning, activity analysis, manual 
 
 ## Quickstart
 
+One-command local launch:
+
+```bash
+./scripts/start_app.sh
+```
+
+This starts the backend and frontend, then opens `http://localhost:5173`.
+Keep that terminal open while using the app. Press `Ctrl-C` in that terminal to stop both servers.
+
+Stop both servers:
+
+```bash
+./scripts/stop_app.sh
+```
+
 Backend:
 
 ```bash
