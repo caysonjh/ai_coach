@@ -164,6 +164,16 @@ class CoachService:
             result = self._fallback_response(request, summary, week_start, activities, request_intent, effective_aggressiveness)
         elif request_intent == "analysis":
             result = self._ground_analysis_result(result, activities, summary, today)
+        elif request_intent == "planning":
+            result = self._ground_planning_result(
+                result,
+                request,
+                summary,
+                week_start,
+                activities,
+                today,
+                effective_aggressiveness,
+            )
 
         response = self._coerce_response(result, used_ollama)
         insight = CoachInsight(
@@ -372,6 +382,81 @@ class CoachService:
         result["proposed_workouts"] = []
         return result
 
+    def _ground_planning_result(
+        self,
+        result: dict[str, Any],
+        request: CoachRequest,
+        summary: dict,
+        week_start: date,
+        activities: list[Activity],
+        today: date,
+        effective_aggressiveness: float,
+    ) -> dict[str, Any]:
+        if self._is_low_quality_plan(result, today):
+            return self._fallback_response(
+                request,
+                summary,
+                week_start,
+                activities,
+                request_intent="planning",
+                effective_aggressiveness=effective_aggressiveness,
+            )
+
+        digest = self._activity_digest(activities, today - timedelta(days=7))
+        data_summary = (
+            f"Grounded on current data: {summary['activities_7d']} activities, "
+            f"{summary['volume_7d_hours']} hours in the last 7 days, split={summary['discipline_hours_7d']}. "
+            f"Effective aggressiveness={effective_aggressiveness}."
+        )
+        result["summary"] = f"{data_summary}\n\n{result.get('summary', '')}".strip()
+        result["recommendations"] = [
+            f"Recent 7-day sport balance: {digest['by_sport']}.",
+            *[str(item) for item in result.get("recommendations", [])],
+        ]
+        result["proposed_workouts"] = [
+            item
+            for item in result.get("proposed_workouts", [])
+            if self._planned_date(item) >= today
+        ]
+        if not result["proposed_workouts"]:
+            return self._fallback_response(
+                request,
+                summary,
+                week_start,
+                activities,
+                request_intent="planning",
+                effective_aggressiveness=effective_aggressiveness,
+            )
+        return result
+
+    def _is_low_quality_plan(self, result: dict[str, Any], today: date) -> bool:
+        title = str(result.get("title", "")).lower()
+        summary = str(result.get("summary", "")).lower()
+        workouts = result.get("proposed_workouts", [])
+        if not isinstance(workouts, list) or not workouts:
+            return True
+        if any(self._planned_date(item) < today for item in workouts):
+            return True
+        if "chronic fatigue syndrome" in title and "training plan" in title:
+            return True
+        if "designed to help the athlete build a stable week" in summary:
+            return True
+        if len(workouts) == 1:
+            item = workouts[0]
+            duration = int(item.get("duration_minutes") or 0)
+            sport = str(item.get("sport", "")).lower()
+            description = str(item.get("description", "")).lower()
+            title = str(item.get("title", "")).lower()
+            if duration <= 35 and sport in {"bike", "ride"} and "easy" in f"{title} {description}":
+                return True
+        return False
+
+    def _planned_date(self, item: dict[str, Any]) -> date:
+        try:
+            return date.fromisoformat(str(item.get("planned_date")))
+        except Exception:
+            return date.min
+
     def _fallback_response(
         self,
         request: CoachRequest,
@@ -405,11 +490,13 @@ class CoachService:
         recovery_bias = effective_aggressiveness < 0.35 or bool(summary.get("recovery_flags"))
         intensity = "easy" if recovery_bias else "moderate"
         volume_multiplier = 0.8 if effective_aggressiveness < 0.3 else 1.0 if effective_aggressiveness < 0.55 else 1.2 if effective_aggressiveness < 0.8 else 1.35
-        anchor = max(week_start, date.today())
+        today = date.today()
+        anchor = max(week_start, today)
+        final_date = self._planning_end_date(request.message, anchor)
         recommendations = [
-            "Keep Strava as the activity truth source and manually log Garmin recovery metrics daily.",
-            "Prioritize consistency across swim, bike, and run before adding intensity.",
-            "Use the calendar approval flow to protect key sessions while adapting around fatigue.",
+            f"Use the last 7 days as the load anchor: {summary['volume_7d_hours']} hours across {summary['discipline_hours_7d']}.",
+            f"Apply the current aggressiveness setting as: {self._aggressiveness_guidance(effective_aggressiveness)}",
+            "Keep the remaining week specific enough to progress, but do not stack hard run and bike stress on back-to-back days.",
         ]
         if summary.get("recovery_flags"):
             recommendations.insert(0, "Treat current recovery flags as constraints, not trivia.")
@@ -417,14 +504,14 @@ class CoachService:
         return {
             "title": "This Week's Training Focus",
             "summary": (
-                f"You have {summary['volume_7d_hours']} hours in the last 7 days and "
-                f"{summary['volume_28d_hours']} hours in the last 28 days. "
-                "The next step is to build a stable week that preserves recovery while keeping "
-                "triathlon frequency high."
+                f"From the imported data you have {summary['volume_7d_hours']} hours in the last 7 days and "
+                f"{summary['volume_28d_hours']} hours in the last 28 days. This plan covers "
+                f"{anchor.isoformat()} through {final_date.isoformat()} and uses recent sport balance, not a generic template."
             ),
             "recommendations": recommendations,
             "risks": summary.get("recovery_flags", []) + ["Ollama was unavailable, so this is rule-based."],
             "proposed_workouts": [
+                workout for workout in [
                 {
                     "planned_date": anchor.isoformat(),
                     "sport": "run",
@@ -470,5 +557,12 @@ class CoachService:
                     "status": "planned",
                     "source": "derived",
                 },
+                ] if date.fromisoformat(workout["planned_date"]) <= final_date
             ],
         }
+
+    def _planning_end_date(self, message: str, anchor: date) -> date:
+        normalized = message.lower()
+        if "rest of the week" in normalized or "rest of week" in normalized:
+            return anchor + timedelta(days=6 - anchor.weekday())
+        return anchor + timedelta(days=6)

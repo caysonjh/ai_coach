@@ -86,3 +86,46 @@ def test_analysis_guard_strips_model_workouts_and_adds_data_summary() -> None:
     assert grounded["proposed_workouts"] == []
     assert "Past 7 days from imported data" in grounded["summary"]
     assert "First Newport Run" in grounded["summary"]
+
+
+def test_planning_guard_replaces_stale_generic_ollama_plan() -> None:
+    service = CoachService()
+    request = CoachRequest(message="Plan the rest of the week", aggressiveness=0.45)
+    model_result = {
+        "title": "Training Plan for Athlete with Chronic Fatigue Syndrome and ADHD/Depression",
+        "summary": "The training plan is designed to help the athlete build a stable week.",
+        "recommendations": ["Start with a short bike workout tomorrow."],
+        "risks": [],
+        "proposed_workouts": [
+            {
+                "planned_date": "2023-02-20",
+                "sport": "Bike",
+                "title": "Easy Bike Ride",
+                "description": "30 minutes of easy bike riding.",
+                "duration_minutes": 30,
+                "intensity": "easy",
+            }
+        ],
+    }
+    summary = {
+        "activities_7d": 4,
+        "volume_7d_hours": 6.1,
+        "volume_28d_hours": 34.4,
+        "discipline_hours_7d": {"run": 1.0, "bike": 2.0, "swim": 0.4, "strength": 0.6},
+        "recovery_flags": [],
+    }
+
+    grounded = service._ground_planning_result(
+        model_result,
+        request,
+        summary,
+        date(2026, 4, 27),
+        [],
+        date(2026, 4, 30),
+        effective_aggressiveness=0.45,
+    )
+
+    assert grounded["title"] == "This Week's Training Focus"
+    assert all(date.fromisoformat(item["planned_date"]) >= date(2026, 4, 30) for item in grounded["proposed_workouts"])
+    assert all(date.fromisoformat(item["planned_date"]) <= date(2026, 5, 3) for item in grounded["proposed_workouts"])
+    assert grounded["proposed_workouts"][0]["duration_minutes"] > 30
