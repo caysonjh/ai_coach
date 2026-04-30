@@ -34,6 +34,7 @@ from app.schemas.api import (
     WorkoutLocationFeedbackCreate,
 )
 from app.services.analytics import summarize_training
+from app.services.activity_dedupe import upsert_activity
 from app.services.coach import CoachService
 from app.services.garmin_files import scan_garmin_directory
 from app.services.imports import parse_activity_csv
@@ -201,7 +202,7 @@ def create_gear(payload: GearItemCreate, session: Session = Depends(get_session)
 @router.post("/activities", response_model=Activity)
 def create_activity(payload: ActivityCreate, session: Session = Depends(get_session)) -> Activity:
     activity = Activity(**payload.model_dump())
-    session.add(activity)
+    activity, _ = upsert_activity(session, activity)
     session.commit()
     session.refresh(activity)
     return activity
@@ -214,10 +215,13 @@ async def import_activities_csv(
 ) -> dict:
     content = (await file.read()).decode("utf-8")
     activities = parse_activity_csv(content)
+    imported = 0
     for activity in activities:
-        session.add(activity)
+        _, created = upsert_activity(session, activity)
+        if created:
+            imported += 1
     session.commit()
-    return {"imported": len(activities)}
+    return {"imported": imported, "merged": len(activities) - imported}
 
 
 @router.get("/metrics/options")

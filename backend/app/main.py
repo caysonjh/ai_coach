@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 from app.api.routes import router
 from app.db.session import engine, init_db
 from app.models.entities import AthleteProfile, CoachMemory
+from app.services.activity_dedupe import deduplicate_existing_activities
 from app.services.garmin_files import scan_garmin_directory
 from app.services.state_export import export_coach_context
 
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
         init_db()
         seed_profile()
         with Session(engine) as session:
+            deduplicate_existing_activities(session)
             scan_garmin_directory(session)
             export_coach_context(session)
 

@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.models.entities import Activity, HealthMetric, ImportJob, Source
 from app.schemas.api import GarminImportStatus
+from app.services.activity_dedupe import upsert_activity
 from app.services.imports import (
     parse_activity_csv,
     parse_fit_if_available,
@@ -45,8 +46,8 @@ def scan_garmin_directory(session: Session) -> GarminImportStatus:
         try:
             activities, metrics, message = _parse_file(path, source_id)
             for activity in activities:
-                if not _activity_exists(session, activity.source_id):
-                    session.add(activity)
+                _, created = upsert_activity(session, activity)
+                if created:
                     imported_activities += 1
             for metric in metrics:
                 session.add(metric)
@@ -97,11 +98,3 @@ def _parse_file(path: Path, source_id: str) -> tuple[list[Activity], list[Health
             return [], [], "Skipped FIT file because no FIT parser is available."
         return [activity], [], "Imported FIT activity."
     return [], [], "Unsupported extension."
-
-
-def _activity_exists(session: Session, source_id: str | None) -> bool:
-    if not source_id:
-        return False
-    return session.exec(
-        select(Activity).where(Activity.source == Source.file_import, Activity.source_id == source_id)
-    ).first() is not None

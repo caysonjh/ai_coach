@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from app.core.config import get_settings
 from app.models.entities import Activity, GearItem, GearType, OAuthAccount, Source, Sport, SportVariant
+from app.services.activity_dedupe import upsert_activity
 
 
 SPORT_MAP = {
@@ -87,8 +88,9 @@ class StravaConnector:
                 if not batch:
                     break
                 for item in batch:
-                    session.add(self._activity_from_strava(item))
-                    imported += 1
+                    _, created = upsert_activity(session, self._activity_from_strava(item))
+                    if created:
+                        imported += 1
                 page += 1
         session.commit()
         return imported
