@@ -132,19 +132,19 @@ class CoachService:
             week_start=workspace["week_start"],
             request_intent=workspace["request_intent"],
             effective_aggressiveness=workspace["effective_aggressiveness"],
-            athlete_profile=workspace["profile"].model_dump() if workspace["profile"] else {},
-            athlete_profile_markdown=workspace["athlete_profile_markdown"],
+            athlete_profile=self._compact_profile(workspace["profile"]),
+            athlete_profile_markdown=self._truncate_text(workspace["athlete_profile_markdown"], 800),
             training_summary=workspace["summary"],
             past_7_days_activity_digest=workspace["past_7_days_activity_digest"],
-            recent_activities=[activity.model_dump() for activity in workspace["activities"][-20:]],
-            recent_health_metrics=[metric.model_dump() for metric in workspace["metrics"][-40:]],
-            planned_workouts=[workout.model_dump() for workout in workspace["planned"][:30]],
-            schedule_constraints=[constraint.model_dump() for constraint in workspace["constraints"]],
-            training_locations=[location.model_dump() for location in workspace["locations"]],
-            recent_location_feedback=[item.model_dump() for item in workspace["feedback"]],
-            ranked_location_suggestions=workspace["ranked_location_suggestions"],
-            gear=[item.model_dump() for item in workspace["gear"]],
-            memories=[memory.content for memory in workspace["memories"]],
+            recent_activities=[self._compact_activity(activity) for activity in workspace["activities"][-5:]],
+            recent_health_metrics=[self._compact_metric(metric) for metric in workspace["metrics"][-8:]],
+            planned_workouts=[self._compact_workout(workout) for workout in workspace["planned"][:8]],
+            schedule_constraints=[self._compact_constraint(constraint) for constraint in workspace["constraints"][:5]],
+            training_locations=[self._compact_location(location) for location in workspace["locations"][:5]],
+            recent_location_feedback=[self._compact_feedback(item) for item in workspace["feedback"][:8]],
+            ranked_location_suggestions=self._compact_ranked_locations(workspace["ranked_location_suggestions"]),
+            gear=[self._compact_gear(item) for item in workspace["gear"][:5]],
+            memories=[self._truncate_text(memory.content, 240) for memory in workspace["memories"][:3]],
             coach_guidance=self._coach_guidance(workspace),
             action_endpoints=self.action_endpoints,
         )
@@ -288,6 +288,123 @@ class CoachService:
             "athlete_profile_markdown": me_markdown,
             "past_7_days_activity_digest": self._activity_digest(activities, today - timedelta(days=7)),
         }
+
+    def _compact_profile(self, profile: AthleteProfile | None) -> dict[str, Any]:
+        if not profile:
+            return {}
+        return {
+            "name": profile.name,
+            "goal_summary": profile.goal_summary,
+            "goal_race": profile.goal_race,
+            "target_time": profile.target_time,
+            "notes": self._truncate_text(profile.notes, 240),
+        }
+
+    def _compact_activity(self, activity: Activity) -> dict[str, Any]:
+        return {
+            "id": activity.id,
+            "sport": activity.sport.value,
+            "sport_variant": activity.sport_variant.value,
+            "name": activity.name,
+            "start_time": activity.start_time.isoformat(),
+            "duration_minutes": round(activity.duration_seconds / 60, 1),
+            "distance_meters": activity.distance_meters,
+            "perceived_effort": activity.perceived_effort,
+            "source": activity.source.value,
+        }
+
+    def _compact_metric(self, metric: HealthMetric) -> dict[str, Any]:
+        value = metric.value_num if metric.value_num is not None else metric.value_text
+        return {
+            "id": metric.id,
+            "metric_date": metric.metric_date.isoformat(),
+            "metric_type": metric.metric_type.value,
+            "custom_name": metric.custom_name,
+            "value": value,
+            "unit": metric.unit,
+            "source": metric.source.value,
+        }
+
+    def _compact_workout(self, workout: PlannedWorkout) -> dict[str, Any]:
+        return {
+            "id": workout.id,
+            "planned_date": workout.planned_date.isoformat(),
+            "sport": workout.sport.value,
+            "sport_variant": workout.sport_variant.value,
+            "title": workout.title,
+            "duration_minutes": workout.duration_minutes,
+            "intensity": workout.intensity,
+            "status": workout.status.value,
+            "location_suggestion": workout.location_suggestion,
+            "gear_suggestion": workout.gear_suggestion,
+        }
+
+    def _compact_constraint(self, constraint: ScheduleConstraint) -> dict[str, Any]:
+        return {
+            "id": constraint.id,
+            "constraint_date": constraint.constraint_date.isoformat(),
+            "label": constraint.label,
+            "available_minutes": constraint.available_minutes,
+            "unavailable": constraint.unavailable,
+        }
+
+    def _compact_location(self, location: TrainingLocation) -> dict[str, Any]:
+        return {
+            "id": location.id,
+            "name": location.name,
+            "sport": location.sport.value,
+            "sport_variant": location.sport_variant.value,
+            "surface": location.surface,
+            "tags": self._truncate_text(location.tags, 120),
+            "active": location.active,
+        }
+
+    def _compact_feedback(self, feedback: WorkoutLocationFeedback) -> dict[str, Any]:
+        return {
+            "id": feedback.id,
+            "location_id": feedback.location_id,
+            "activity_id": feedback.activity_id,
+            "planned_workout_id": feedback.planned_workout_id,
+            "feedback_date": feedback.feedback_date.isoformat(),
+            "intended_stimulus": feedback.intended_stimulus,
+            "rating": feedback.rating,
+            "use_again": feedback.use_again,
+        }
+
+    def _compact_gear(self, gear: GearItem) -> dict[str, Any]:
+        return {
+            "id": gear.id,
+            "name": gear.name,
+            "gear_type": gear.gear_type.value,
+            "distance_miles": round(gear.distance_meters / 1609.344, 1),
+            "retire_distance_miles": round(gear.retire_distance_meters / 1609.344, 1) if gear.retire_distance_meters else None,
+            "active": gear.active,
+            "preferred_sport_variants": self._truncate_text(gear.preferred_sport_variants, 120),
+            "preferred_surfaces": self._truncate_text(gear.preferred_surfaces, 120),
+        }
+
+    def _compact_ranked_locations(self, ranked: dict[str, Any]) -> dict[str, Any]:
+        compact: dict[str, Any] = {}
+        for key, entries in ranked.items():
+            compact[key] = [
+                {
+                    "name": entry.get("name"),
+                    "score": entry.get("score"),
+                    "sport": entry.get("sport"),
+                    "sport_variant": entry.get("sport_variant"),
+                    "surface": entry.get("surface"),
+                    "recent_feedback_count": len(entry.get("recent_feedback", [])),
+                }
+                for entry in entries[:3]
+            ]
+        return compact
+
+    def _truncate_text(self, value: str | None, limit: int) -> str:
+        if not value:
+            return ""
+        if len(value) <= limit:
+            return value
+        return value[: max(0, limit - 1)] + "…"
 
     def _coach_guidance(self, workspace: dict[str, Any]) -> list[str]:
         summary = workspace["summary"]

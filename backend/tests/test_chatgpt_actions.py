@@ -76,6 +76,9 @@ def test_build_context_exposes_action_endpoints_and_summary(monkeypatch) -> None
     assert response.action_endpoints[0].path == "/api/chatgpt/context"
     assert response.coach_guidance
     assert response.training_summary["activities_7d"] >= 1
+    assert len(response.recent_activities) <= 5
+    assert all("raw_payload" not in item for item in response.recent_activities)
+    assert len(json.dumps(response.model_dump(mode="json"))) < 20000
 
 
 def test_record_coach_result_persists_workouts_and_plan_version() -> None:
