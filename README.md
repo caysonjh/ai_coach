@@ -75,7 +75,7 @@ Then import the backend OpenAPI document into a Custom GPT and point its action 
 - `GET /api/chatgpt/openapi.json`
 - `POST /api/chatgpt/context`
 - `POST /api/chatgpt/record`
-- `POST /api/coach/apply-workouts`
+- `POST /api/chatgpt/apply-workouts`
 
 The web UI keeps a deterministic local preview so you can still inspect the current data flow without ChatGPT.
 See [docs/chatgpt-actions.md](docs/chatgpt-actions.md) for the import and smoke-test loop.

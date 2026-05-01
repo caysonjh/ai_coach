@@ -128,7 +128,7 @@ def test_chatgpt_openapi_is_trimmed_to_action_paths(monkeypatch) -> None:
     assert set(spec["paths"]) == {
         "/api/chatgpt/context",
         "/api/chatgpt/record",
-        "/api/coach/apply-workouts",
+        "/api/chatgpt/apply-workouts",
         "/api/chatgpt/status",
         "/api/chatgpt/openapi.json",
     }

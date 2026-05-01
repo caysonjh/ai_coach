@@ -138,6 +138,14 @@ class CoachRecordResponse(BaseModel):
     message: str
 
 
+class CoachApplyWorkoutsRequest(BaseModel):
+    workouts: list[PlannedWorkoutCreate] = Field(default_factory=list)
+
+
+class CoachApplyWorkoutsResponse(BaseModel):
+    applied: int
+
+
 class ChatGPTActionsStatus(BaseModel):
     enabled: bool
     auth_required: bool

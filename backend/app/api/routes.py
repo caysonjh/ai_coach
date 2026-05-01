@@ -28,6 +28,8 @@ from app.schemas.api import (
     CoachContextResponse,
     CoachRecordRequest,
     CoachRecordResponse,
+    CoachApplyWorkoutsRequest,
+    CoachApplyWorkoutsResponse,
     ChatGPTActionsStatus,
     ContextExportResponse,
     GarminImportStatus,
@@ -329,7 +331,7 @@ def chatgpt_status() -> ChatGPTActionsStatus:
         actions_openapi_url=f"{base_url}/api/chatgpt/openapi.json" if base_url else "/api/chatgpt/openapi.json",
         context_path="/api/chatgpt/context",
         record_path="/api/chatgpt/record",
-        apply_workouts_path="/api/coach/apply-workouts",
+        apply_workouts_path="/api/chatgpt/apply-workouts",
     )
 
 
@@ -340,19 +342,29 @@ def chatgpt_openapi() -> JSONResponse:
     spec = get_openapi(
         title="AI Coach ChatGPT Actions",
         version="0.1.0",
-        routes=[route for route in router.routes if getattr(route, "path", "").startswith("/api/chatgpt") or getattr(route, "path", "") == "/api/coach/apply-workouts"],
+        routes=[
+            route
+            for route in router.routes
+            if getattr(route, "path", "").startswith("/api/chatgpt")
+        ],
     )
     spec["servers"] = [{"url": settings.chatgpt_public_base_url.rstrip("/") or "http://localhost:8000"}]
     spec["paths"] = {
         path: operations
         for path, operations in spec["paths"].items()
-        if path in {"/api/chatgpt/context", "/api/chatgpt/record", "/api/coach/apply-workouts", "/api/chatgpt/status", "/api/chatgpt/openapi.json"}
+        if path
+        in {
+            "/api/chatgpt/context",
+            "/api/chatgpt/record",
+            "/api/chatgpt/apply-workouts",
+            "/api/chatgpt/status",
+            "/api/chatgpt/openapi.json",
+        }
     }
-    spec.setdefault("components", {}).setdefault("securitySchemes", {})["bearerAuth"] = {
-        "type": "http",
-        "scheme": "bearer",
+    spec.setdefault("components", {})["securitySchemes"] = {
+        "bearerAuth": {"type": "http", "scheme": "bearer"}
     }
-    for path in ("/api/chatgpt/context", "/api/chatgpt/record", "/api/coach/apply-workouts"):
+    for path in ("/api/chatgpt/context", "/api/chatgpt/record", "/api/chatgpt/apply-workouts"):
         if path in spec["paths"]:
             for operation in spec["paths"][path].values():
                 operation.setdefault("security", [{"bearerAuth": []}])
@@ -371,15 +383,16 @@ def chatgpt_record(payload: CoachRecordRequest, session: Session = Depends(get_s
     return CoachService().record_coach_result(session, payload)
 
 
-@router.post("/coach/apply-workouts")
+@router.post("/coach/apply-workouts", response_model=CoachApplyWorkoutsResponse)
+@router.post("/chatgpt/apply-workouts", response_model=CoachApplyWorkoutsResponse)
 def apply_workouts(
-    payload: list[PlannedWorkoutCreate],
+    payload: CoachApplyWorkoutsRequest,
     session: Session = Depends(get_session),
-) -> dict:
-    for item in payload:
+) -> CoachApplyWorkoutsResponse:
+    for item in payload.workouts:
         session.add(PlannedWorkout(**item.model_dump()))
     session.commit()
-    return {"applied": len(payload)}
+    return CoachApplyWorkoutsResponse(applied=len(payload.workouts))
 
 
 @router.get("/connectors/garmin/status")

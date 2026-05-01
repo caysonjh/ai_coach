@@ -22,7 +22,7 @@ CHATGPT_ACTION_TOKEN=your-long-random-token
 - `GET /api/chatgpt/openapi.json`
 - `POST /api/chatgpt/context`
 - `POST /api/chatgpt/record`
-- `POST /api/coach/apply-workouts`
+- `POST /api/chatgpt/apply-workouts`
 
 ## Import flow
 
