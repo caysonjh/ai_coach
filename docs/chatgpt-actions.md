@@ -16,6 +16,13 @@ CHATGPT_ACTION_TOKEN=your-long-random-token
 
 `DATABASE_URL` can stay SQLite for local testing, but a persistent database is the better production choice.
 
+If you want the local app to push changes into the deployed backend, also set:
+
+```bash
+CHATGPT_SYNC_TARGET_URL=https://your-backend.example
+CHATGPT_SYNC_TARGET_TOKEN=your-long-random-token
+```
+
 ## Backend endpoints for ChatGPT
 
 - `GET /api/chatgpt/status`
@@ -31,6 +38,7 @@ CHATGPT_ACTION_TOKEN=your-long-random-token
 3. Import that spec into a Custom GPT with actions.
 4. Add the bearer token header using `CHATGPT_ACTION_TOKEN`.
 5. Use the `context` action before answering, and the `record` action after producing a plan.
+6. If `CHATGPT_SYNC_TARGET_URL` is set on the local backend, writes auto-push after each mutation. Use the ChatGPT Actions panel's `Sync Now` button only when you want to force a full refresh.
 
 ## Local verification
 

@@ -891,10 +891,25 @@ function LocalFilesPanel({ refresh }: { refresh: () => Promise<void> }) {
 
 function ChatGPTPanel() {
   const [status, setStatus] = useState<import("./lib/api").ChatGPTActionsStatus | null>(null);
+  const [syncResult, setSyncResult] = useState<import("./lib/api").ChatGPTSyncPushResponse | null>(null);
+  const [syncError, setSyncError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function load() {
     setStatus(await api.chatgptStatus());
+  }
+
+  async function pushSync() {
+    setBusy(true);
+    setSyncError("");
+    try {
+      setSyncResult(await api.chatgptSyncPush());
+      await load();
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Sync failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -917,15 +932,39 @@ function ChatGPTPanel() {
         <span>{status?.actions_openapi_url || "/api/chatgpt/openapi.json"}</span>
         <small>Import the trimmed ChatGPT action spec from this URL.</small>
       </div>
+      <div className="connector">
+        <strong>Sync target</strong>
+        <span>{status?.sync_target_url || "Set CHATGPT_SYNC_TARGET_URL on the local backend."}</span>
+        <small>{status?.sync_target_configured ? "Local changes can be pushed to the remote backend." : "No remote sync target configured."}</small>
+      </div>
       <div className="compactStatus">
         <span>{status?.context_path ?? "/api/chatgpt/context"}</span>
         <span>{status?.record_path ?? "/api/chatgpt/record"}</span>
         <span>{status?.apply_workouts_path ?? "/api/coach/apply-workouts"}</span>
+        <span>{status?.sync_push_path ?? "/api/sync/chatgpt/push"}</span>
       </div>
-      <button className="primary" onClick={() => { setBusy(true); load().finally(() => setBusy(false)); }} disabled={busy}>
-        <RefreshCw size={16} /> {busy ? "Refreshing..." : "Refresh Status"}
-      </button>
-      <small>ChatGPT should own the live reasoning. This backend exposes grounded context and write-back actions.</small>
+      <div className="buttonRow">
+        <button className="primary" onClick={pushSync} disabled={busy || !status?.sync_target_configured}>
+          <RefreshCw size={16} /> {busy ? "Syncing..." : "Sync Now"}
+        </button>
+        <button onClick={() => { setBusy(true); load().finally(() => setBusy(false)); }} disabled={busy}>
+          <RefreshCw size={16} /> Refresh Status
+        </button>
+      </div>
+      {syncResult && (
+        <div className="compactStatus">
+          <span>{syncResult.message}</span>
+          <span>{syncResult.summary.activities_applied} activities</span>
+          <span>{syncResult.summary.health_metrics_applied} metrics</span>
+          <span>{syncResult.summary.planned_workouts_applied} workouts</span>
+        </div>
+      )}
+      {syncError && (
+        <div className="compactStatus">
+          <span>{syncError}</span>
+        </div>
+      )}
+      <small>ChatGPT should own the live reasoning. Local saves auto-sync to the remote backend when configured; this button forces a full push.</small>
     </Panel>
   );
 }

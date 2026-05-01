@@ -147,6 +147,9 @@ export type ChatGPTActionsStatus = {
   context_path: string;
   record_path: string;
   apply_workouts_path: string;
+  sync_push_path: string;
+  sync_target_configured: boolean;
+  sync_target_url: string;
 };
 
 export type CoachRecordRequest = {
@@ -166,6 +169,24 @@ export type CoachRecordResponse = {
   saved_insight: boolean;
   saved_plan_version: boolean;
   applied_workouts: number;
+  message: string;
+};
+
+export type ChatGPTSyncSummary = {
+  athlete_profile_saved: boolean;
+  activities_applied: number;
+  health_metrics_applied: number;
+  planned_workouts_applied: number;
+  schedule_constraints_applied: number;
+  training_locations_applied: number;
+  recent_location_feedback_applied: number;
+  gear_applied: number;
+};
+
+export type ChatGPTSyncPushResponse = {
+  remote_base_url: string;
+  pushed: boolean;
+  summary: ChatGPTSyncSummary;
   message: string;
 };
 
@@ -248,8 +269,13 @@ export const api = {
     request<CoachContextResponse>("/api/chatgpt/context", { method: "POST", body: JSON.stringify(payload) }),
   chatgptRecord: (payload: CoachRecordRequest) =>
     request<CoachRecordResponse>("/api/chatgpt/record", { method: "POST", body: JSON.stringify(payload) }),
+  chatgptSyncPush: (payload?: Record<string, unknown>) =>
+    request<ChatGPTSyncPushResponse>("/api/sync/chatgpt/push", { method: "POST", body: JSON.stringify(payload ?? {}) }),
   applyWorkouts: (payload: PlannedWorkout[]) =>
-    request<{ applied: number }>("/api/coach/apply-workouts", { method: "POST", body: JSON.stringify(payload) }),
+    request<{ applied: number }>("/api/chatgpt/apply-workouts", {
+      method: "POST",
+      body: JSON.stringify({ workouts: payload })
+    }),
   ollamaStatus: () => request<OllamaStatus>("/api/ollama/status"),
   ensureOllama: () => request<OllamaStatus>("/api/ollama/ensure", { method: "POST" }),
   modelRecommendation: () => request<ModelRecommendation>("/api/ollama/recommendation"),

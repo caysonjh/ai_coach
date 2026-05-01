@@ -70,6 +70,13 @@ CHATGPT_PUBLIC_BASE_URL=https://your-domain.example
 CHATGPT_ACTION_TOKEN=your-long-random-token
 ```
 
+For a local app that pushes changes to that deployed backend, also set:
+
+```bash
+CHATGPT_SYNC_TARGET_URL=https://your-domain.example
+CHATGPT_SYNC_TARGET_TOKEN=your-long-random-token
+```
+
 Then import the backend OpenAPI document into a Custom GPT and point its action calls at:
 
 - `GET /api/chatgpt/openapi.json`
@@ -79,6 +86,8 @@ Then import the backend OpenAPI document into a Custom GPT and point its action 
 
 The web UI keeps a deterministic local preview so you can still inspect the current data flow without ChatGPT.
 See [docs/chatgpt-actions.md](docs/chatgpt-actions.md) for the import and smoke-test loop.
+
+When `CHATGPT_SYNC_TARGET_URL` is configured, local writes auto-push to the remote backend after each mutation. The ChatGPT Actions panel still has a manual `Sync Now` button if you want to force a full refresh.
 
 ## Ollama
 

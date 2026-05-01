@@ -1,6 +1,6 @@
 from datetime import date, datetime, time, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -26,6 +26,10 @@ from app.schemas.api import (
     CoachRequest,
     CoachResponse,
     CoachContextResponse,
+    ChatGPTSyncSnapshot,
+    ChatGPTSyncSummary,
+    ChatGPTSyncPushRequest,
+    ChatGPTSyncPushResponse,
     CoachRecordRequest,
     CoachRecordResponse,
     CoachApplyWorkoutsRequest,
@@ -44,6 +48,12 @@ from app.schemas.api import (
 )
 from app.services.analytics import summarize_training
 from app.services.activity_dedupe import upsert_activity
+from app.services.chatgpt_sync import (
+    apply_chatgpt_sync_snapshot,
+    build_chatgpt_sync_snapshot,
+    push_chatgpt_sync,
+    push_chatgpt_sync_sync,
+)
 from app.services.coach import CoachService
 from app.services.garmin_files import scan_garmin_directory
 from app.services.imports import parse_activity_csv
@@ -62,6 +72,19 @@ def require_chatgpt_token(credentials: HTTPAuthorizationCredentials | None = Dep
         return
     if not credentials or credentials.scheme.lower() != "bearer" or credentials.credentials != expected:
         raise HTTPException(status_code=401, detail="Invalid ChatGPT action token")
+
+
+def _queue_chatgpt_sync(background_tasks: BackgroundTasks, session: Session) -> None:
+    settings = get_settings()
+    remote_base_url = settings.chatgpt_sync_target_url.strip()
+    if not remote_base_url:
+        return
+    background_tasks.add_task(
+        push_chatgpt_sync_sync,
+        build_chatgpt_sync_snapshot(session),
+        remote_base_url,
+        settings.chatgpt_sync_target_token,
+    )
 
 
 @router.get("/health")
@@ -141,8 +164,13 @@ def dashboard(session: Session = Depends(get_session)) -> dict:
 
 
 @router.post("/garmin-files/scan", response_model=GarminImportStatus)
-def scan_garmin_files(session: Session = Depends(get_session)) -> GarminImportStatus:
-    return scan_garmin_directory(session)
+def scan_garmin_files(
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> GarminImportStatus:
+    result = scan_garmin_directory(session)
+    _queue_chatgpt_sync(background_tasks, session)
+    return result
 
 
 @router.get("/garmin-files/status", response_model=GarminImportStatus)
@@ -176,12 +204,14 @@ def list_locations(session: Session = Depends(get_session)) -> list[TrainingLoca
 @router.post("/locations", response_model=TrainingLocation)
 def create_location(
     payload: TrainingLocationCreate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> TrainingLocation:
     location = TrainingLocation(**payload.model_dump())
     session.add(location)
     session.commit()
     session.refresh(location)
+    _queue_chatgpt_sync(background_tasks, session)
     return location
 
 
@@ -195,12 +225,14 @@ def list_location_feedback(session: Session = Depends(get_session)) -> list[Work
 @router.post("/locations/feedback", response_model=WorkoutLocationFeedback)
 def create_location_feedback(
     payload: WorkoutLocationFeedbackCreate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> WorkoutLocationFeedback:
     feedback = WorkoutLocationFeedback(**payload.model_dump())
     session.add(feedback)
     session.commit()
     session.refresh(feedback)
+    _queue_chatgpt_sync(background_tasks, session)
     return feedback
 
 
@@ -210,25 +242,36 @@ def list_gear(session: Session = Depends(get_session)) -> list[GearItem]:
 
 
 @router.post("/gear", response_model=GearItem)
-def create_gear(payload: GearItemCreate, session: Session = Depends(get_session)) -> GearItem:
+def create_gear(
+    payload: GearItemCreate,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> GearItem:
     gear = GearItem(**payload.model_dump())
     session.add(gear)
     session.commit()
     session.refresh(gear)
+    _queue_chatgpt_sync(background_tasks, session)
     return gear
 
 
 @router.post("/activities", response_model=Activity)
-def create_activity(payload: ActivityCreate, session: Session = Depends(get_session)) -> Activity:
+def create_activity(
+    payload: ActivityCreate,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> Activity:
     activity = Activity(**payload.model_dump())
     activity, _ = upsert_activity(session, activity)
     session.commit()
     session.refresh(activity)
+    _queue_chatgpt_sync(background_tasks, session)
     return activity
 
 
 @router.post("/activities/import/csv")
 async def import_activities_csv(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -240,6 +283,7 @@ async def import_activities_csv(
         if created:
             imported += 1
     session.commit()
+    _queue_chatgpt_sync(background_tasks, session)
     return {"imported": imported, "merged": len(activities) - imported}
 
 
@@ -257,11 +301,16 @@ def list_metrics(
 
 
 @router.post("/metrics", response_model=HealthMetric)
-def create_metric(payload: HealthMetricCreate, session: Session = Depends(get_session)) -> HealthMetric:
+def create_metric(
+    payload: HealthMetricCreate,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> HealthMetric:
     metric = HealthMetric(**payload.model_dump())
     session.add(metric)
     session.commit()
     session.refresh(metric)
+    _queue_chatgpt_sync(background_tasks, session)
     return metric
 
 
@@ -273,12 +322,14 @@ def list_workouts(session: Session = Depends(get_session)) -> list[PlannedWorkou
 @router.post("/calendar/workouts", response_model=PlannedWorkout)
 def create_workout(
     payload: PlannedWorkoutCreate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> PlannedWorkout:
     workout = PlannedWorkout(**payload.model_dump())
     session.add(workout)
     session.commit()
     session.refresh(workout)
+    _queue_chatgpt_sync(background_tasks, session)
     return workout
 
 
@@ -286,6 +337,7 @@ def create_workout(
 def update_workout(
     workout_id: int,
     payload: dict,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> PlannedWorkout:
     workout = session.get(PlannedWorkout, workout_id)
@@ -297,24 +349,33 @@ def update_workout(
     session.add(workout)
     session.commit()
     session.refresh(workout)
+    _queue_chatgpt_sync(background_tasks, session)
     return workout
 
 
 @router.post("/calendar/constraints", response_model=ScheduleConstraint)
 def create_constraint(
     payload: ScheduleConstraintCreate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> ScheduleConstraint:
     constraint = ScheduleConstraint(**payload.model_dump())
     session.add(constraint)
     session.commit()
     session.refresh(constraint)
+    _queue_chatgpt_sync(background_tasks, session)
     return constraint
 
 
 @router.post("/coach", response_model=CoachResponse)
-async def coach(payload: CoachRequest, session: Session = Depends(get_session)) -> CoachResponse:
-    return await CoachService().respond(session, payload)
+async def coach(
+    payload: CoachRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> CoachResponse:
+    response = await CoachService().respond(session, payload)
+    _queue_chatgpt_sync(background_tasks, session)
+    return response
 
 
 @router.get("/chatgpt/status", response_model=ChatGPTActionsStatus)
@@ -323,6 +384,7 @@ def chatgpt_status() -> ChatGPTActionsStatus:
     settings = get_settings()
     enabled = bool(settings.chatgpt_action_token.strip())
     base_url = settings.chatgpt_public_base_url.rstrip("/")
+    sync_target = settings.chatgpt_sync_target_url.rstrip("/")
     return ChatGPTActionsStatus(
         enabled=enabled,
         auth_required=enabled,
@@ -332,6 +394,9 @@ def chatgpt_status() -> ChatGPTActionsStatus:
         context_path="/api/chatgpt/context",
         record_path="/api/chatgpt/record",
         apply_workouts_path="/api/chatgpt/apply-workouts",
+        sync_push_path="/api/sync/chatgpt/push",
+        sync_target_configured=bool(sync_target),
+        sync_target_url=settings.chatgpt_sync_target_url,
     )
 
 
@@ -346,6 +411,7 @@ def chatgpt_openapi() -> JSONResponse:
             route
             for route in router.routes
             if getattr(route, "path", "").startswith("/api/chatgpt")
+            and getattr(route, "path", "") != "/api/chatgpt/sync"
         ],
     )
     spec["servers"] = [{"url": settings.chatgpt_public_base_url.rstrip("/") or "http://localhost:8000"}]
@@ -357,6 +423,7 @@ def chatgpt_openapi() -> JSONResponse:
             "/api/chatgpt/context",
             "/api/chatgpt/record",
             "/api/chatgpt/apply-workouts",
+            "/api/chatgpt/sync",
             "/api/chatgpt/status",
             "/api/chatgpt/openapi.json",
         }
@@ -378,20 +445,57 @@ def chatgpt_context(payload: CoachRequest, session: Session = Depends(get_sessio
 
 
 @router.post("/chatgpt/record", response_model=CoachRecordResponse, dependencies=[Depends(require_chatgpt_token)])
-def chatgpt_record(payload: CoachRecordRequest, session: Session = Depends(get_session)) -> CoachRecordResponse:
+def chatgpt_record(
+    payload: CoachRecordRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> CoachRecordResponse:
     """Persist a ChatGPT-authored coach response and optional approved workouts."""
-    return CoachService().record_coach_result(session, payload)
+    response = CoachService().record_coach_result(session, payload)
+    _queue_chatgpt_sync(background_tasks, session)
+    return response
+
+
+@router.post("/chatgpt/sync", response_model=ChatGPTSyncSummary, dependencies=[Depends(require_chatgpt_token)])
+def chatgpt_sync(payload: ChatGPTSyncSnapshot, session: Session = Depends(get_session)) -> ChatGPTSyncSummary:
+    """Apply a training snapshot from the local app into the ChatGPT backend."""
+    return apply_chatgpt_sync_snapshot(session, payload)
+
+
+@router.post("/sync/chatgpt/push", response_model=ChatGPTSyncPushResponse)
+async def push_chatgpt_sync_snapshot(
+    payload: ChatGPTSyncPushRequest | None = None,
+    session: Session = Depends(get_session),
+) -> ChatGPTSyncPushResponse:
+    settings = get_settings()
+    remote_base_url = (payload.remote_base_url if payload and payload.remote_base_url else settings.chatgpt_sync_target_url).strip()
+    remote_token = payload.remote_token if payload and payload.remote_token is not None else settings.chatgpt_sync_target_token
+    if not remote_base_url:
+        raise HTTPException(status_code=400, detail="No ChatGPT sync target URL configured")
+
+    try:
+        summary = await push_chatgpt_sync(build_chatgpt_sync_snapshot(session), remote_base_url, remote_token)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"ChatGPT sync push failed: {exc}") from exc
+    return ChatGPTSyncPushResponse(
+        remote_base_url=remote_base_url,
+        pushed=True,
+        summary=summary,
+        message="Local training state pushed to the ChatGPT backend.",
+    )
 
 
 @router.post("/coach/apply-workouts", response_model=CoachApplyWorkoutsResponse)
 @router.post("/chatgpt/apply-workouts", response_model=CoachApplyWorkoutsResponse)
 def apply_workouts(
     payload: CoachApplyWorkoutsRequest,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> CoachApplyWorkoutsResponse:
     for item in payload.workouts:
         session.add(PlannedWorkout(**item.model_dump()))
     session.commit()
+    _queue_chatgpt_sync(background_tasks, session)
     return CoachApplyWorkoutsResponse(applied=len(payload.workouts))
 
 
@@ -415,20 +519,28 @@ async def strava_callback(code: str, session: Session = Depends(get_session)) ->
 
 
 @router.post("/connectors/strava/sync")
-async def strava_sync(session: Session = Depends(get_session)) -> dict:
+async def strava_sync(
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> dict:
     account = session.exec(select(OAuthAccount).where(OAuthAccount.provider == "strava")).first()
     if not account:
         raise HTTPException(status_code=400, detail="Strava is not connected")
     imported = await StravaConnector().sync_recent_activities(session, account)
+    _queue_chatgpt_sync(background_tasks, session)
     return {"imported": imported}
 
 
 @router.post("/connectors/strava/sync-gear")
-async def strava_sync_gear(session: Session = Depends(get_session)) -> dict:
+async def strava_sync_gear(
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> dict:
     account = session.exec(select(OAuthAccount).where(OAuthAccount.provider == "strava")).first()
     if not account:
         raise HTTPException(status_code=400, detail="Strava is not connected")
     synced = await StravaConnector().sync_gear(session, account)
+    _queue_chatgpt_sync(background_tasks, session)
     return {"synced": synced}
 
 

@@ -155,6 +155,43 @@ class ChatGPTActionsStatus(BaseModel):
     context_path: str
     record_path: str
     apply_workouts_path: str
+    sync_push_path: str
+    sync_target_configured: bool
+    sync_target_url: str
+
+
+class ChatGPTSyncSnapshot(BaseModel):
+    athlete_profile: dict[str, Any] | None = None
+    activities: list[dict[str, Any]] = Field(default_factory=list)
+    health_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    planned_workouts: list[dict[str, Any]] = Field(default_factory=list)
+    schedule_constraints: list[dict[str, Any]] = Field(default_factory=list)
+    training_locations: list[dict[str, Any]] = Field(default_factory=list)
+    recent_location_feedback: list[dict[str, Any]] = Field(default_factory=list)
+    gear: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatGPTSyncSummary(BaseModel):
+    athlete_profile_saved: bool
+    activities_applied: int
+    health_metrics_applied: int
+    planned_workouts_applied: int
+    schedule_constraints_applied: int
+    training_locations_applied: int
+    recent_location_feedback_applied: int
+    gear_applied: int
+
+
+class ChatGPTSyncPushRequest(BaseModel):
+    remote_base_url: str | None = None
+    remote_token: str | None = None
+
+
+class ChatGPTSyncPushResponse(BaseModel):
+    remote_base_url: str
+    pushed: bool
+    summary: ChatGPTSyncSummary
+    message: str
 
 
 class SettingsResponse(BaseModel):

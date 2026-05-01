@@ -7,7 +7,9 @@ from app.db.session import engine, init_db
 from app.models.entities import AthleteProfile, CoachMemory
 from app.services.activity_dedupe import deduplicate_existing_activities
 from app.services.athlete_context import read_me_markdown
+from app.services.chatgpt_sync import build_chatgpt_sync_snapshot, push_chatgpt_sync_sync
 from app.services.garmin_files import scan_garmin_directory
+from app.core.config import get_settings
 from app.services.state_export import export_coach_context
 
 
@@ -30,6 +32,7 @@ def create_app() -> FastAPI:
             deduplicate_existing_activities(session)
             scan_garmin_directory(session)
             export_coach_context(session)
+            sync_chatgpt_remote(session)
 
     return app
 
@@ -42,7 +45,7 @@ def seed_profile() -> None:
             if notes and existing.notes != notes:
                 existing.notes = notes
                 session.add(existing)
-                session.commit()
+            session.commit()
             return
         profile = AthleteProfile(
             name="Cayson Hamilton",
@@ -67,6 +70,21 @@ def seed_profile() -> None:
             )
         )
         session.commit()
+
+
+def sync_chatgpt_remote(session: Session) -> None:
+    settings = get_settings()
+    remote_base_url = settings.chatgpt_sync_target_url.strip()
+    if not remote_base_url:
+        return
+    try:
+        push_chatgpt_sync_sync(
+            build_chatgpt_sync_snapshot(session),
+            remote_base_url,
+            settings.chatgpt_sync_target_token,
+        )
+    except Exception as exc:
+        print(f"ChatGPT sync on startup failed: {exc}")
 
 
 app = create_app()

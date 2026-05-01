@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     ollama_embed_model: str = "embeddinggemma"
     chatgpt_public_base_url: str = ""
     chatgpt_action_token: str = ""
+    chatgpt_sync_target_url: str = ""
+    chatgpt_sync_target_token: str = ""
     app_secret: str = "dev-only-change-me"
     strava_client_id: str = ""
     strava_client_secret: str = ""
